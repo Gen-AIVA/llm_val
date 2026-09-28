@@ -1,0 +1,224 @@
+rules:
+  # "Специальные правила написания кода", 1
+  # "Основная функция теста всегда отдает из себя словарь
+  # {'report': report, 
+  #  'precomputed': precomputed}"
+  - id: valtest-return-structure
+    message: |
+      Основная функция теста ОБЯЗАНА возвращать словарь строго с ключами 
+      'report' и 'precomputed'. 
+      Сборка словаря должна происходить явно в операторе return.
+      Правильно: return {'report': report_data, 'precomputed': precomp_data}
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          def $FUNC(...):
+            ...
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: '^valtest_'
+      - pattern-not: |
+          def $FUNC(...):
+            ...
+            return {'report': ..., 'precomputed': ...}
+            ...
+      
+
+  # "Нейминг и иерархия", 1
+  # Название основной функции теста должно начинаться с valtest_ .
+  - id: valtest-naming-convention
+    message: |
+      Функция, реализующая тест, должна начинаться с 'valtest_'.
+      Обнаружена функция, возвращающая словарь с 'report' и 'precomputed', 
+      но не имеющая нужного префикса.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          def $FUNC(...):
+            ...
+            return {'report': $R, 'precomputed': $P}
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: '^(?!valtest_).*'
+
+  # "Общие правила написания кода", 20
+  # «По возможности не используем конструкции try-except: ...тест не должен заниматься
+  # проверкой корректности данных!»
+  - id: no-try-except-in-tests
+    message: |
+      Не используйте конструкцию try-except для проверки корректности 
+      данных. Тест не должен заниматься валидацией, он должен падать (fail fast).
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern-inside: |
+          def $FUNC(...):
+            ...
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: '^valtest_'
+      - pattern: |
+          try:
+            ...
+          except $E:
+            ...
+
+  # "Специальные правила написания кода", 7
+  # «Типизация должна быть прописана с использованием библиотеки typing.
+  # ... если для переменной доступны несколько типов, то используется tp.Union...
+  # если переменная может быть None, то используется tp.Optional»
+  - id: enforce-tp-typing-aliases
+    message: |
+      В проекте принято использовать алиас tp. 
+      Ожидается `import typing as tp`. Прямые импорты (`from typing import ...`) 
+      и использование `typing.` запрещены.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: typing.$ANY_TYPE
+          - pattern: from typing import $IMPORT
+      - pattern-not: tp.$ANY_TYPE
+
+  # "Unit-тестирование", 4
+  # «У основной функции теста обязательно должен быть проверен формат выхода ...
+  # assert isinstance(test_res, dict)
+  # assert set(test_res.keys()) == {'report', 'precomputed'}»
+  - id: mandatory-test-asserts
+    message: |
+      В unit-тесте после вызова основной функции valtest_... должны следовать проверки:
+      assert isinstance(<result>, dict)
+      assert set(<result>.keys()) == {'report', 'precomputed'}
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          def $TESTFUNC(...):
+            ...
+            $RES = $VALTEST(...)
+            ...
+      - metavariable-regex:
+          metavariable: $TESTFUNC
+          regex: '^test_'
+      - metavariable-regex:
+          metavariable: $VALTEST
+          regex: '^valtest_'
+      - pattern-not: |
+          def $TESTFUNC(...):
+            ...
+            $RES = $VALTEST(...)
+            ...
+            assert isinstance($RES, dict)
+            assert set($RES.keys()) == {'report', 'precomputed'}
+            ...
+    paths:
+      include:
+        - "**/unit_tests/**"
+
+  # "Общие правила написания кода", 14
+  # «Нельзя использовать глобальные переменные за исключением оговоренных случаев»
+  - id: no-global-variables
+    message: |
+      Нельзя использовать глобальные переменные 
+      (за исключением оговоренных с проверяющим случаев).
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern: global $VAR
+
+  # "Нейминг и иерархия", 1, 2
+  # «Название функции для создания словаря с результатами теста должно начинаться с report_valtest_.
+  # Она всегда идет первой в модуле... Основная функция теста... идет второй»
+  - id: valtest-correct-function-order
+    message: |
+      Нарушение иерархии! Функция report_valtest_ должна идти ПЕРЕД 
+      основной функцией valtest_, а не после нее.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          def $VALTEST(...):
+            ...
+          def $REPORT(...):
+            ...
+      - metavariable-regex:
+          metavariable: $VALTEST
+          regex: '^valtest_'
+      - metavariable-regex:
+          metavariable: $REPORT
+          regex: '^report_valtest_'
+
+
+  # "Специальные правила написания кода", 8
+  # Запрет жёстко закодированных секретов, токенов, ключей.
+  - id: no-hardcoded-credentials
+    message: >
+      Обнаружена потенциально жёстко закодированная аутентификационная информация
+      (токен, пароль, API-ключ). Такие данные запрещены в коде тестов.
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: $VAR = "$STR"
+          - pattern: $VAR = '$STR'
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: '(?i)(password|passwd|secret|token|api_key|apikey|auth_token)'
+      - metavariable-regex:
+          metavariable: $STR
+          regex: >-
+            (sk-|xox[ab]-
+            |ghp_|gho_|ghu_|ghs_|ghr_
+            |glpat-
+            |eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}
+            |-----BEGIN\s?(RSA|DSA|EC|OPENSSH|PGP) PRIVATE KEY-----
+            |[A-Za-z0-9+/]{40,}={0,2}
+            )
+
+  # "Общие правила написания кода", 19
+  # Запрет использования print()
+  - id: no-print-statements
+    message: |
+      Запрещено использовать print(). Для отслеживания прогресса используйте tqdm.
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern: print(...)
+    paths:
+      # Правило сработает ТОЛЬКО для файлов внутри директории val_test
+      include:
+        - "**/val_test/**"
+
+  # "Общие правила написания кода", 49
+  # «Нельзя использовать вложенные функции за исключением оговоренных с проверяющим случаев»
+  - id: no-nested-functions
+    message: |
+      Использование вложенных функций (def внутри def) запрещено. 
+      Выносите вспомогательные функции на уровень модуля. 
+      (Исключение: локальные моки в unit-тестах разрешены).
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern-inside: |
+          def $OUTER(...):
+            ...
+      - pattern: |
+          def $INNER(...):
+            ...
+      - pattern-not-inside: |
+          def $FUNC(...):
+            ...
+      - pattern-not-inside: |
+          class $CLASS(...):
+            ...
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: '^test_'
+      - metavariable-regex:
+          metavariable: $CLASS
+          regex: '^Test'
+    paths:
+      include:
+        - "**/val_test/**"

@@ -1,0 +1,44 @@
+# Folders
+/data
+/examples/ai-forever
+/examples/cointegrated
+/examples/RussianNLP
+/examples/data/brainstorm
+/examples/data/rag_vectorstore
+.DS_Store
+/examples/.DS_Store
+
+# Python
+__pycache__/
+
+# Jupyter
+.cache/
+.config/
+.ipython/
+.local/
+.ipynb_checkpoints/
+.jupyter/
+
+# Other IDE
+.vscode/
+.idea/
+.gigacode/
+
+# Secrets
+.env
+
+# docs
+*.docx
+*.pdf
+
+# pre-commit
+.mypy_cache/
+.ruff_cache/
+
+# venv
+.venv/
+
+# uv
+uv.lock
+
+

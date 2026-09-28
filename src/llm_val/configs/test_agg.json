@@ -1,0 +1,62 @@
+{
+    "data_quality": {
+        "name": "Качество данных",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "model_quality": {
+        "name": "Качество модели",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "rag_quality": {
+        "name": "Спецификация RAG",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "specification_ner": {
+        "name": "Спецификация NER",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "specification_qa_kd": {
+        "name": "Спецификация QA и KD",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "specification_chat": {
+        "name": "Спецификация Chat",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "specification_extract": {
+        "name": "Спецификация Extract",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "brainstorm": {
+        "name": "Спецификация Brainstorm",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "specification_rewrite": {
+        "name": "Спецификация Rewrite",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "stability": {
+        "name": "Стабильность",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "stability_without_target": {
+        "name": "Стабильность текстов на неразмеченных данных",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "middlegame": {
+        "name": "Предварительная валидация подготовленных датасетов (Миттельшпиль)",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    }
+}

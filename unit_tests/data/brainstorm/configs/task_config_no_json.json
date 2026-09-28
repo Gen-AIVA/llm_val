@@ -1,0 +1,9 @@
+{
+"runs": [
+  {"embedders_name": "e5",
+     "function_pairs": [["dot_sim", "craft_sim_idea_idea"], ["cos_sim", "craft_sim_idea_idea"]],
+    "use_text_cleaner": "True"},
+        {"embedders_name": "sbert",
+     "function_pairs": [["dot_sim", "craft_sim_idea_idea"], ["cos_sim", "craft_sim_idea_idea"]],
+    "use_text_cleaner": "True"}
+]}

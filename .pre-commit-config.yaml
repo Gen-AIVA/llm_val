@@ -1,0 +1,44 @@
+# Файлы и папки, которые линтерам не нужно проверять
+exclude: ^(\.venv|\.git|.mypy_cache|\.ruff_cache)/
+
+repos:
+  - repo: local
+    hooks:
+      # --Ruff: formatting--  
+      - id: ruff-format
+        name: Ruff Format
+        entry: ruff format
+        language: system
+        types_or: [python, pyi]
+
+      # --Ruff: linting--  
+      - id: ruff-lint
+        name: Ruff Linter
+        entry: ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      
+      # --Mypy--
+      - id: mypy
+        name: Mypy Type Checker
+        entry: mypy
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+        args: ["--follow-imports=skip"]
+         
+      # --Semgrep--
+      - id: semgrep
+        name: Semgrep Custom Rules
+        entry: semgrep
+        language: system
+        types_or: [python, pyi]
+        args:
+          - "--config"
+          - "code-rules.yaml"
+          - "--error"
+          - "--emacs"
+          - "--skip-unknown-extensions"
+          - "--metrics=off"
+        pass_filenames: true

@@ -1,0 +1,55 @@
+{
+    "runs": [
+        {
+            "embedder": {
+                "name":"e5",
+                "use_text_cleaner": "True",
+                "normalize": "False",
+                "use_lemmatization": "False"
+            },
+            "distances": [
+                "cosine",
+                "euclidean"
+            ]
+            
+        },
+        {
+            "embedder": {
+                "name":"e5",
+                "use_text_cleaner": "False",
+                "normalize": "False",
+                "use_lemmatization": "False"
+            },
+            "distances": [
+                "cosine",
+                "euclidean"
+            ]
+        },
+        {   
+            "embedder": {
+                "name":"sbert",
+                "use_text_cleaner": "True",
+                "normalize": "False",
+                "use_lemmatization": "False"
+            },
+            "distances": [
+                "cosine",
+                "euclidean"
+            ]
+        },
+        {
+            "embedder": {
+                "name":"sbert",
+                "use_text_cleaner": "False",
+                "normalize": "False",
+                "use_lemmatization": "False"
+            },
+            "distances": [
+                "cosine",
+                "euclidean"
+            ]
+        }
+    ],
+    "stopwords_path": "data/brainstorm/ru_stop_words.txt",
+    "seed": 42
+}

@@ -1,0 +1,22 @@
+{
+    "middlegame_base_tests": {
+        "name": "Базовые тесты этапа 2",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },   
+    "middlegame_extra_tests": {
+        "name": "Дополнительные тесты этапа 2",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },
+    "base_tests": {
+        "name": "Базовые тесты этапа 3",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    },    
+    "extra_tests": {
+        "name": "Дополнительные тесты этапа 3",
+        "func": "llm_val.utils.report_helper.worst_semaphore", 
+        "params": {}
+    }
+}

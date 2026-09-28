@@ -1,0 +1,32 @@
+{
+"names": [
+    {"point_name": "point",
+    "score_name": "score",
+    "theme_name": "thema",
+    "task_idea_name": "task_idea",
+    "idea_idea_name": "idea_idea",
+    "dist_cell_name": "distance_to_summit",
+    "task_name": "question",
+    "ideas_name": "model_answer"},
+    {
+        "raw_task_name": "task",
+        "raw_ideas_name": "ideas",
+        "raw_theme_name": "theme",
+        "raw_score_name": "score"
+    }
+],
+"palettes": [
+    {"drawer_palette": [
+        "tab:blue",
+        "tab:orange",
+        "tab:green",
+        "tab:pink",
+        "tab:cyan"
+    ]}
+],
+"nlp": [
+   {"language": "russian",
+    "stopwords_path": "data/brainstorm/ru_stop_words.txt",
+    "re_ideas_splitter": "(\\\\n\\\\n)?№\\d[\\.:]"}
+]
+}
