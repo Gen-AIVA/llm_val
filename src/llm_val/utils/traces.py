@@ -1,7 +1,7 @@
-import typing as tp
-from collections import deque
-
 import pandas as pd
+import typing as tp
+
+from collections import deque
 
 
 def prepare_traces(data: pd.DataFrame,

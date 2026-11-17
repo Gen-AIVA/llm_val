@@ -1,13 +1,12 @@
-import typing as tp
-
 import pandas as pd
+import typing as tp
 
 from llm_val.sampler.Sampler import Sampler
 from llm_val.utils.get_data import get_data
-from llm_val.utils.report_helper import worst_semaphore, semaphore_by_threshold_without_red
+from llm_val.utils.traces import prepare_traces
 from llm_val.utils.traces import extract_graph_components as extract_graph_components
 from llm_val.utils.traces import find_connected_components as find_connected_components
-from llm_val.utils.traces import prepare_traces
+from llm_val.utils.report_helper import worst_semaphore, semaphore_by_threshold_without_red
 
 
 def report_valtest_trace_connectivity(start_nodes: tp.List[str],

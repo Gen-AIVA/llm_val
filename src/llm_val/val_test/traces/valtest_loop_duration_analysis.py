@@ -1,12 +1,11 @@
-import typing as tp
-
 import pandas as pd
+import typing as tp
 
 from llm_val.sampler.Sampler import Sampler
 from llm_val.utils.get_data import get_data
+from llm_val.utils.traces import prepare_traces
 from llm_val.utils.traces import calc_loop_statistic as calc_loop_statistic
 from llm_val.utils.traces import calc_time_statistic as calc_time_statistic
-from llm_val.utils.traces import prepare_traces
 
 
 def report_valtest_loop_duration_analysis(result_dataframe: pd.DataFrame) -> tp.Dict[str, tp.Any]:

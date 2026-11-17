@@ -1,17 +1,17 @@
-import json
 import os
-from pathlib import Path
-import subprocess
 import sys
+import json
+import pytest
+import subprocess
+import pandas as pd
 import typing as tp
 
-import pandas as pd
-import pytest
+from pathlib import Path
 
 from llm_val.sampler.Sampler import Sampler
-from llm_val.utils.traces import calc_loop_statistic, calc_time_statistic, extract_graph_components, prepare_traces
-from llm_val.val_test.traces.valtest_loop_duration_analysis import valtest_loop_duration_analysis
 from llm_val.val_test.traces.valtest_trace_connectivity import valtest_trace_connectivity
+from llm_val.val_test.traces.valtest_loop_duration_analysis import valtest_loop_duration_analysis
+from llm_val.utils.traces import calc_loop_statistic, calc_time_statistic, extract_graph_components, prepare_traces
 
 
 def _traces(cases: tp.Dict[str, tp.List[str]]) -> pd.DataFrame:

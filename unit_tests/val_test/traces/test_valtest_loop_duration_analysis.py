@@ -1,10 +1,12 @@
-import typing as tp
 import pytest
 import numpy as np
 import pandas as pd
+import typing as tp
+
 from datetime import datetime, timedelta
-from llm_val.sampler.TracesSampler import TracesSampler
+
 from llm_val.utils.traces import prepare_traces
+from llm_val.sampler.TracesSampler import TracesSampler
 from llm_val.val_test.traces.valtest_loop_duration_analysis import (valtest_loop_duration_analysis,
                                                                  calc_time_statistic,
                                                                  calc_loop_statistic)

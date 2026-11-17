@@ -1,11 +1,10 @@
-import typing as tp
 import pytest
 import pandas as pd
-
+import typing as tp
 
 from llm_val.sampler.Sampler import Sampler
-from llm_val.sampler.TracesSampler import TracesSampler
 from llm_val.utils.traces import prepare_traces
+from llm_val.sampler.TracesSampler import TracesSampler
 from llm_val.val_test.traces.valtest_trace_connectivity import (valtest_trace_connectivity,
                                                              find_connected_components,
                                                              extract_graph_components)
