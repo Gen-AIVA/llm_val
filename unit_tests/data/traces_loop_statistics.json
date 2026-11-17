@@ -1,0 +1,246 @@
+{
+  "records": [
+    {
+      "trace_id": "a",
+      "span_name": "A",
+      "start_time_ns": 0,
+      "end_time_ns": 1000000000
+    },
+    {
+      "trace_id": "a",
+      "span_name": "B",
+      "start_time_ns": 2000000000,
+      "end_time_ns": 3000000000
+    },
+    {
+      "trace_id": "a",
+      "span_name": "A",
+      "start_time_ns": 4000000000,
+      "end_time_ns": 5000000000
+    },
+    {
+      "trace_id": "a",
+      "span_name": "B",
+      "start_time_ns": 6000000000,
+      "end_time_ns": 7000000000
+    },
+    {
+      "trace_id": "a",
+      "span_name": "C",
+      "start_time_ns": 8000000000,
+      "end_time_ns": 9000000000
+    },
+    {
+      "trace_id": "a",
+      "span_name": "A",
+      "start_time_ns": 10000000000,
+      "end_time_ns": 11000000000
+    },
+    {
+      "trace_id": "a",
+      "span_name": "A",
+      "start_time_ns": 12000000000,
+      "end_time_ns": 13000000000
+    },
+    {
+      "trace_id": "a",
+      "span_name": "D",
+      "start_time_ns": 14000000000,
+      "end_time_ns": 15000000000
+    },
+    {
+      "trace_id": "b",
+      "span_name": "B",
+      "start_time_ns": 0,
+      "end_time_ns": 1000000000
+    },
+    {
+      "trace_id": "b",
+      "span_name": "C",
+      "start_time_ns": 2000000000,
+      "end_time_ns": 3000000000
+    },
+    {
+      "trace_id": "b",
+      "span_name": "D",
+      "start_time_ns": 4000000000,
+      "end_time_ns": 5000000000
+    },
+    {
+      "trace_id": "b",
+      "span_name": "B",
+      "start_time_ns": 6000000000,
+      "end_time_ns": 7000000000
+    },
+    {
+      "trace_id": "b",
+      "span_name": "C",
+      "start_time_ns": 8000000000,
+      "end_time_ns": 9000000000
+    },
+    {
+      "trace_id": "b",
+      "span_name": "D",
+      "start_time_ns": 10000000000,
+      "end_time_ns": 11000000000
+    },
+    {
+      "trace_id": "b",
+      "span_name": "B",
+      "start_time_ns": 12000000000,
+      "end_time_ns": 13000000000
+    },
+    {
+      "trace_id": "c",
+      "span_name": "E",
+      "start_time_ns": 0,
+      "end_time_ns": 1000000000
+    },
+    {
+      "trace_id": "c",
+      "span_name": "F",
+      "start_time_ns": 2000000000,
+      "end_time_ns": 3000000000
+    },
+    {
+      "trace_id": "c",
+      "span_name": "E",
+      "start_time_ns": 4000000000,
+      "end_time_ns": 5000000000
+    },
+    {
+      "trace_id": "c",
+      "span_name": "F",
+      "start_time_ns": 6000000000,
+      "end_time_ns": 7000000000
+    },
+    {
+      "trace_id": "c",
+      "span_name": "F",
+      "start_time_ns": 8000000000,
+      "end_time_ns": 9000000000
+    },
+    {
+      "trace_id": "c",
+      "span_name": "E",
+      "start_time_ns": 10000000000,
+      "end_time_ns": 11000000000
+    },
+    {
+      "trace_id": "c",
+      "span_name": "F",
+      "start_time_ns": 12000000000,
+      "end_time_ns": 13000000000
+    },
+    {
+      "trace_id": "d",
+      "span_name": "G",
+      "start_time_ns": 0,
+      "end_time_ns": 1000000000
+    },
+    {
+      "trace_id": "e",
+      "span_name": "H",
+      "start_time_ns": 0,
+      "end_time_ns": 1000000000
+    },
+    {
+      "trace_id": "e",
+      "span_name": "H",
+      "start_time_ns": 2000000000,
+      "end_time_ns": 3000000000
+    },
+    {
+      "trace_id": "e",
+      "span_name": "H",
+      "start_time_ns": 4000000000,
+      "end_time_ns": 5000000000
+    },
+    {
+      "trace_id": "e",
+      "span_name": "H",
+      "start_time_ns": 6000000000,
+      "end_time_ns": 7000000000
+    },
+    {
+      "trace_id": "f",
+      "span_name": "A",
+      "start_time_ns": 0,
+      "end_time_ns": 1000000000
+    },
+    {
+      "trace_id": "f",
+      "span_name": "D",
+      "start_time_ns": 2000000000,
+      "end_time_ns": 3000000000
+    },
+    {
+      "trace_id": "f",
+      "span_name": "C",
+      "start_time_ns": 4000000000,
+      "end_time_ns": 5000000000
+    }
+  ],
+  "expected": {
+    "Нода": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H"
+    ],
+    "В начало": [
+      0.4,
+      0.8,
+      0.75,
+      0.5,
+      0.6666666666666666,
+      1.0,
+      0.0,
+      0.75
+    ],
+    "В себя": [
+      0.26666666666666666,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.0,
+      1.0
+    ],
+    "«Возврат»": [
+      0.4,
+      0.4,
+      0.0,
+      0.0,
+      0.6666666666666666,
+      1.0,
+      0.0,
+      1.0
+    ],
+    "«Пинг-Понг»": [
+      0.0,
+      0.8,
+      1.0,
+      0.5,
+      0.6666666666666666,
+      1.0,
+      0.0,
+      0.5
+    ],
+    "В произвольную операцию": [
+      0.5000000000000001,
+      0.0,
+      0.37500000000000006,
+      0.37500000000000006,
+      0.16666666666666663,
+      0.37500000000000006,
+      1.0,
+      0.37500000000000006
+    ]
+  }
+}

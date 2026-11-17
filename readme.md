@@ -18,6 +18,60 @@
 
 ## Структура библиотеки
 
+### Расчёты по трейсам без sberpm
+
+`valtest_trace_connectivity` и `valtest_loop_duration_analysis` используют
+собственные функции из `llm_val.utils.traces`. Для этих расчётов достаточно
+`pandas` и стандартной библиотеки; устанавливать `sberpm` не требуется.
+Сигнатуры двух `valtest_*`, формат `report` / `precomputed`, названия колонок
+и передача готовых результатов сохранены.
+
+Вспомогательные функции работают с DataFrame:
+
+```python
+from llm_val.utils.traces import (
+    prepare_traces,
+    extract_graph_components,
+    calc_time_statistic,
+    calc_loop_statistic,
+)
+
+traces = prepare_traces(data)
+start_nodes, end_nodes, components = extract_graph_components(traces)
+time_statistics = calc_time_statistic(traces)
+loop_statistics = calc_loop_statistic(traces)
+```
+
+`prepare_traces` принимает имена колонок через `col_case`, `col_stage`,
+`col_start_time`, `col_end_time`. По умолчанию это `trace_id`, `span_name`,
+`start_time_ns`, `end_time_ns`. Числовое время интерпретируется как Unix-время
+в наносекундах; также поддерживаются datetime и строки. Длительности считаются
+в секундах. События сортируются по трейсу, началу, концу и имени ноды;
+исходная таблица не меняется.
+
+Реализация сохраняет прежние расчёты: направленный обход графа в порядке
+появления нод, строгие границы квантилей 5% и 95%, пять показателей
+зацикленности и их min-max нормализацию между нодами. Константные показатели
+нормализуются в ноль. Воспроизведены и особенности прежнего алгоритма:
+сдвиг на три события для «Пинг-Понга», разметка одиночных событий в показателе
+произвольного цикла и граница общего индекса для возврата в начало.
+Это замена зависимости, а не изменение определений метрик.
+
+Значения сверены с расчётами из локальной поставки `sberpm 3.4.3`.
+Контрольные входы и результаты находятся в
+`unit_tests/data/traces_loop_statistics.json`; для их проверки исходная
+библиотека не нужна. Прямые вызовы вспомогательных функций теперь принимают
+подготовленный DataFrame вместо `DataHolder` / `Graph`.
+
+```bash
+cd unit_tests
+PYTHONPATH=../src python -m pytest utils/test_traces.py \
+    val_test/traces/test_valtest_trace_connectivity.py \
+    val_test/traces/test_valtest_loop_duration_analysis.py
+```
+
+### Каталоги
+
 Иерархия и описание директорий и файлов в библиотеке:
 - model - Различные реализации моделей:
     - GigaModel.py - родительский класс, от которого должны наследоваться все реализации моделей;
