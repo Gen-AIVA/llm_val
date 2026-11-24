@@ -3,12 +3,11 @@ from itertools import combinations
 import numpy as np
 import typing as tp
 import pandas as pd
-import krippendorff
 from sklearn.metrics import cohen_kappa_score
-from statsmodels.stats.inter_rater import fleiss_kappa, aggregate_raters
 
 from llm_val.sampler.Sampler import Sampler
 from llm_val.utils.report_helper import semaphore_by_threshold, worst_semaphore
+from llm_val.val_test.data_quality.annotation_agreement_v4 import VERSION, report_agreement, run_agreement
 
 
 def report_valtest_annotation_quality_agent(criteria_stats: tp.List[tp.Dict[str, tp.Any]],
@@ -56,6 +55,76 @@ def report_valtest_annotation_quality_agent(criteria_stats: tp.List[tp.Dict[str,
 
 
 def valtest_annotation_quality_agent(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
+                                     data_type: str = 'test',
+                                     min_periods: int = 1,
+                                     metric_columns: tp.Optional[tp.List[str]] = None,
+                                     semaphore_threshold_spear: tp.Tuple[float, float] = (0.3, 0.6),
+                                     semaphore_threshold_krip: tp.Tuple[float, float] = (0.1, 0.4),
+                                     semaphore_threshold_cohen: tp.Tuple[float, float] = (0.4, 0.8),
+                                     semaphore_threshold_fleiss: tp.Tuple[float, float] = (0.4, 0.8),
+                                     exec_env: str = 'default',
+                                     is_info: bool = True,
+                                     criteria_stats: tp.Optional[tp.List[tp.Dict[str, tp.Any]]] = None,
+                                     *,
+                                     criteria_specs: tp.Optional[tp.Mapping[str, tp.Mapping[str, tp.Any]]] = None,
+                                     final_labels: tp.Optional[pd.DataFrame] = None,
+                                     dynamic_overlap: tp.Optional[bool] = None,
+                                     initial_rating_column: tp.Optional[str] = None,
+                                     rating_order_column: tp.Optional[str] = None,
+                                     semaphore_thresholds: tp.Optional[tp.Mapping[str, tp.Tuple[float, float]]] = None,
+                                     methodology_version: tp.Optional[str] = None,
+                                     **kwargs) -> tp.Dict[str, tp.Dict[str, tp.Any]]:
+    """Evaluate inter-rater agreement according to GenAI methodology 5.3.2 v4.
+
+    Supply criteria_specs by column with scale (nominal, ordinal, interval or
+    multilabel), categories, optional Cohen weights (linear/quadratic), and the
+    multilabel_method (per_label/jaccard). For ordinal strings, provide categories
+    in their agreed order. An ordered categorical dtype also provides the order.
+
+    Final Dawid–Skene labels come from the matching sampler y columns keyed by
+    session_id or from final_labels. If unavailable, the test can fit a
+    Dawid–Skene aggregation on all valid ratings, including adjudicators.
+
+    For dynamic coverage, use an is_initial column or mark the first two
+    independent ratings through initial_rating_column or rating_order_column.
+    A new adjudicator label goes to the main calculation with partial overlap.
+    Class-level agreement uses the initial ratings.
+
+    The default is_info=True gives an informational gray report. In ordinary
+    mode the worst primary color applies. The old algorithm and thresholds
+    remain available through valtest_annotation_quality_agent_legacy.
+    """
+    default_thresholds = {'coefficient': (0.4, 0.7), 'class': (0.4, 0.8)}
+    if semaphore_thresholds and set(semaphore_thresholds) - default_thresholds.keys():
+        raise ValueError('Допустимые группы границ светофора: coefficient и class.')
+    thresholds = {**default_thresholds, **(semaphore_thresholds or {})}
+    if not is_info:
+        for low, high in thresholds.values():
+            if not -1 <= low < high <= 1:
+                raise ValueError('Границы светофора должны удовлетворять условию −1 ≤ low < high ≤ 1.')
+    if sampler is None and criteria_stats is not None and methodology_version == VERSION:
+        return report_agreement(criteria_stats, is_info=is_info, thresholds=thresholds)
+    if sampler is None:
+        raise ValueError('Для расчёта по v4 требуются индивидуальные оценки асессоров.')
+    sample = sampler[data_type] if exec_env == 'sberds' or isinstance(sampler, dict) else getattr(sampler, data_type)
+    final = sample.get('y') if final_labels is None else final_labels
+    ratings = pd.DataFrame(sample.get('X'))
+    return run_agreement(
+        ratings, _as_final_table(final, ratings), metric_columns, criteria_specs or {},
+        dynamic=dynamic_overlap, flag=initial_rating_column, order=rating_order_column,
+        is_info=is_info, thresholds=thresholds,
+    )
+
+
+def _as_final_table(final, ratings):
+    table = pd.DataFrame(final)
+    keyed_mapping = isinstance(final, dict) and any(isinstance(labels, dict) for labels in final.values())
+    if keyed_mapping and 'session_id' in ratings and table.index.isin(ratings['session_id']).all():
+        return table.rename_axis('session_id')
+    return table
+
+
+def valtest_annotation_quality_agent_legacy(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
                                      data_type: str='test',
                                      min_periods: int=1,
                                      metric_columns: tp.Optional[tp.List[str]]=None,
@@ -244,6 +313,8 @@ def krippendorff_alpha(df: pd.DataFrame,
     unique_vals = np.unique(matrix[~np.isnan(matrix)])
     if len(unique_vals) <= 1:
         return np.nan
+    import krippendorff
+
     return krippendorff.alpha(reliability_data=matrix,
                               level_of_measurement='nominal')
 
@@ -322,4 +393,6 @@ def fleiss_kappa_calc(df: pd.DataFrame,
                                aggfunc='first').T.dropna()
     if test_data.empty:
         return np.nan
+    from statsmodels.stats.inter_rater import aggregate_raters, fleiss_kappa
+
     return fleiss_kappa(aggregate_raters(test_data)[0])
