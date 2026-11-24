@@ -4,11 +4,25 @@ import pandas as pd
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 from scipy.stats import friedmanchisquare, wilcoxon, ttest_1samp, ttest_ind
+from dataclasses import replace
 from functools import partial
+from types import SimpleNamespace
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 from llm_val.sampler.Sampler import Sampler
+from llm_val.scorer.BinaryClassScorer import BinaryClassScorer
+from llm_val.scorer.NerScorer import NerScorer
 from llm_val.scorer.Scorer import Scorer
+from llm_val.scorer.UniversalScorer import UniversalScorer
+from llm_val.utils.metrics import METRICS
+from llm_val.utils.ner_metrics import NER_METRICS
 from llm_val.utils.report_helper import semaphore_by_threshold
+from llm_val.val_test.model_quality.stat_significance_v4 import Hypothesis, NerMatching, TERMS, run_significance
+from llm_val.val_test.model_quality.stat_significance_v4 import metric_kind as normalize_metric_kind
+
+
+_BINARY_SCORERS = {'accuracy': accuracy_score, 'precision': precision_score, 'recall': recall_score, 'f1': f1_score}
+_NER_MICRO_F1 = {'ner_exact_match_micro_f1', 'ner_partial_match_micro_f1'}
 
 
 def report_valtest_stat_significance(p_value: float,
@@ -46,6 +60,219 @@ def report_valtest_stat_significance(p_value: float,
 
 
 def valtest_stat_significance(sampler: tp.Union[Sampler, tp.Dict],
+                              scorer: tp.Optional[Scorer] = None,
+                              metric_agg: str = 'single_mean',
+                              data_type: str = 'test',
+                              main_column: tp.Optional[str] = None,
+                              value_threshold: float = 0.5,
+                              extra_samplers: tp.Optional[tp.Dict[str, tp.Any]] = None,
+                              same_questions: bool = False,
+                              semaphore_threshold: tp.Tuple[float, float] = (0.01, 0.05),
+                              bootstrap: bool = False,
+                              bootstrap_iterations: int = 1000,
+                              bootstrap_ci_type: str = 'percentile',
+                              alternative: tp.Optional[str] = None,
+                              exec_env: str = 'default',
+                              random_state: tp.Optional[int] = None,
+                              is_info: bool = True,
+                              p_value: tp.Optional[float] = None,
+                              calc_metric_fn: tp.Optional[tp.Callable] = None,
+                              *,
+                              metric_kind: tp.Optional[str] = None,
+                              metric_thresholds: tp.Optional[tp.Mapping[str, float]] = None,
+                              comparison_margin: float = 0.0,
+                              id_column: tp.Optional[str] = None,
+                              positive_label: tp.Any = 1,
+                              methods: tp.Optional[tp.Sequence[str]] = None,
+                              significance_level: tp.Optional[float] = None,
+                              main_metric: tp.Optional[str] = None,
+                              ner_exact_match: tp.Optional[bool] = None,
+                              ner_ignore_repetitions: bool = False,
+                              **kwargs) -> tp.Dict[str, tp.Dict[str, tp.Any]]:
+    """Run GenAI 5.3.4 with the v4 methodology.
+
+    Set metric_agg or metric_kind to accuracy, precision, recall, f1, single_mean,
+    or custom. Custom metrics use the scorer key given by metric_agg or the
+    supplied calc_metric_fn. Classification metrics use one row per independent
+    object with true_answer/model_answer or TP/FP/FN/TN counts. Set positive_label
+    for binary labels other than 0/1. For accuracy, binary scores are also accepted.
+    For NER, extracted/target entity dictionaries are supported for pooled
+    Precision, Recall and F1 using the sampler's entity_types. Configure the
+    matching mode with ner_exact_match and ner_ignore_repetitions when needed.
+    A configured scorer with a different calculation for a classification
+    alias is evaluated as a custom metric. Use main_metric to select one of
+    several outputs, or set metric_kind explicitly to choose the calculation.
+
+    Provide value_threshold for a business threshold and metric_thresholds for
+    additional classification thresholds. For version comparisons, use
+    extra_samplers and comparison_margin. For paired versions also set
+    same_questions=True and provide a common id_column if it cannot be inferred.
+    The default direction follows the v4 method table: less for comparisons of
+    per-object numeric scores with Welch/Wilcoxon, greater for the other cases.
+    alternative applies to the primary hypothesis. Additional classification
+    thresholds use the upper tail. A second threshold for the primary metric
+    reuses the selected metric definition.
+
+    Set bootstrap=True to report bootstrap alongside the default method or pass
+    the agreed methods explicitly. With several hypotheses, each uses the
+    compatible methods from that list, or its default if none apply. Pass
+    significance_level to include a conclusion at that level. The report names
+    the effect estimated by each method and explains how their results relate.
+    The default is_info=True yields a gray result. With
+    is_info=False, semaphore_threshold sets the p-value bounds (0.01 and 0.05
+    by default). The overall color follows the primary p-value. The precomputed
+    p_value argument is accepted for compatibility and the test recomputes it
+    from the supplied data.
+    """
+    baselines = {
+        name: _significance_frames(sample, data_type, exec_env)
+        for name, sample in (extra_samplers or {}).items()
+    }
+    frames = _significance_frames(sampler, data_type, exec_env)
+    accuracy_column = None if 'metric_value' in frames[0] else main_column
+    metric_name = _metric_alias(metric_agg)
+    scorer_metrics = getattr(scorer, 'metrics', {}) or {}
+    score_key = metric_agg
+    if calc_metric_fn is None and (metric_kind is None or normalize_metric_kind(metric_kind) == 'custom'):
+        score_key = _scorer_metric_key(scorer_metrics, metric_agg, metric_name)
+    kind = _significance_metric_kind(
+        metric_kind, metric_name, scorer, scorer_metrics, score_key, calc_metric_fn, main_metric,
+    )
+    if kind == 'mean' and main_metric is not None and _uses_standard_scorer(
+        scorer, scorer_metrics.get(score_key), kind, metric_name, main_metric, score_key,
+    ):
+        main_column = main_metric[len(score_key) + 1:]
+    ner = _significance_ner_matching(sampler, extra_samplers, metric_name, ner_exact_match, ner_ignore_repetitions)
+    reference = comparison_margin if baselines else value_threshold
+    metric = calc_metric_fn
+    if metric is None and scorer is not None and kind == 'custom':
+        metric = partial(_score_significance_metric, scorer=scorer, metric_agg=score_key,
+                         data_type=data_type, main_column=main_column, main_metric=main_metric, ner=ner,
+                         is_ner_micro_f1=metric_name in _NER_MICRO_F1)
+    primary = Hypothesis(metric_agg, kind, float(reference), metric, bool(baselines), main_column)
+    hypotheses = [primary, *_additional_hypotheses(primary, metric_name, metric_thresholds, accuracy_column)]
+    return run_significance(
+        frames, baselines, hypotheses,
+        paired=same_questions, id_column=id_column, positive_label=positive_label, ner=ner,
+        alternative=alternative, methods=methods, include_bootstrap=bootstrap, iterations=bootstrap_iterations,
+        ci_type=bootstrap_ci_type, random_state=random_state, significance_level=significance_level,
+        is_info=is_info, semaphore_threshold=semaphore_threshold,
+    )
+
+
+def _additional_hypotheses(primary, metric_name, metric_thresholds, accuracy_column):
+    for name, threshold in (metric_thresholds or {}).items():
+        additional_kind = _metric_alias(name)
+        if _is_primary_metric(additional_kind, primary.kind, metric_name):
+            yield replace(primary, label=name, reference=float(threshold), compare_versions=False)
+            continue
+        if additional_kind not in TERMS:
+            raise ValueError(f'Неизвестная метрика классификации в metric_thresholds: {name!r}.')
+        column = accuracy_column if additional_kind == 'accuracy' else None
+        yield Hypothesis(name, additional_kind, float(threshold), None, False, column)
+
+
+def _is_primary_metric(candidate, primary_kind, metric_name):
+    if primary_kind == 'custom':
+        return candidate == metric_name
+    if candidate in TERMS or candidate == 'mean':
+        return candidate == primary_kind
+    return candidate == metric_name and (candidate not in _NER_MICRO_F1 or primary_kind == 'f1')
+
+
+def _significance_frames(sampler, data_type, exec_env):
+    data = sampler[data_type] if exec_env == 'sberds' or isinstance(sampler, dict) else getattr(sampler, data_type)
+    return pd.DataFrame(data['y']), pd.DataFrame(data.get('X'))
+
+
+def _metric_alias(name):
+    return normalize_metric_kind(name).replace('ner_metrics_', 'ner_', 1)
+
+
+def _scorer_metric_key(metrics, metric_agg, name):
+    if metric_agg in metrics or (name not in TERMS and name not in _NER_MICRO_F1 and name != 'mean'):
+        return metric_agg
+    aliases = [key for key in metrics if _metric_alias(key) == name]
+    if len(aliases) > 1:
+        raise ValueError(f'Для {metric_agg!r} найдено несколько метрик scorer. Укажите точный ключ: {aliases}.')
+    return aliases[0] if aliases else metric_agg
+
+
+def _significance_metric_kind(explicit, name, scorer, scorer_metrics, score_key, metric, main_metric):
+    if explicit is not None:
+        kind = normalize_metric_kind(explicit)
+        if kind not in TERMS and kind not in {'mean', 'custom'}:
+            raise ValueError(f'Неизвестный тип метрики: {explicit!r}.')
+        return kind
+    if metric is not None:
+        return 'custom'
+    kind = 'f1' if name in _NER_MICRO_F1 else name
+    if kind not in TERMS and kind != 'mean':
+        return 'custom'
+    configured = scorer_metrics.get(score_key)
+    if configured is not None:
+        return kind if _uses_standard_scorer(scorer, configured, kind, name, main_metric, score_key) else 'custom'
+    if kind == 'mean' and len(scorer_metrics) == 1:
+        (key, config), = scorer_metrics.items()
+        accuracy = _metric_alias(key) == 'accuracy' and _uses_standard_scorer(
+            scorer, config, 'accuracy', 'accuracy', main_metric, key,
+        )
+        return 'accuracy' if accuracy else kind
+    return kind
+
+
+def _uses_standard_scorer(scorer, configured, kind, name, main_metric, score_key):
+    if not isinstance(configured, tp.Mapping):
+        return False
+    implementation = getattr(scorer.calc, '__func__', None)
+    call = configured.get('call')
+    if kind == 'mean':
+        selector = f'{score_key}_'
+        return (implementation is UniversalScorer.calc and call is METRICS['single_mean']['call']
+                and configured.get('is_singlecol')
+                and (main_metric is None or (main_metric.startswith(selector) and len(main_metric) > len(selector))))
+    if configured.get('is_singlecol', True):
+        return False
+    if name in _NER_MICRO_F1:
+        return (implementation is NerScorer.calc and call is NER_METRICS[name]['call']
+                and main_metric in (None, 'micro_f1'))
+    return (implementation is BinaryClassScorer.calc and call is _BINARY_SCORERS[kind]
+            and main_metric in (None, score_key))
+
+
+def _significance_ner_matching(sampler, extra_samplers, ner_key, exact_match, ignore_repetitions):
+    entities = getattr(sampler, 'entity_types', None)
+    if entities is not None:
+        entities = tuple(entities)
+        for baseline in (extra_samplers or {}).values():
+            baseline_types = getattr(baseline, 'entity_types', None)
+            if baseline_types is not None and set(entities) != set(baseline_types):
+                raise ValueError('Для сравнения версий NER должны использоваться одинаковые типы сущностей.')
+    if exact_match is None:
+        exact_match = ner_key != 'ner_partial_match_micro_f1'
+    return NerMatching(entities, exact_match, ignore_repetitions)
+
+
+def _score_significance_metric(rows, scorer, metric_agg, data_type, main_column, main_metric, ner, is_ner_micro_f1):
+    sample = SimpleNamespace(**{data_type: {'y': rows}}, entity_types=ner.entity_types)
+    values = scorer.calc(sampler=sample, data_type=data_type, metric_name=metric_agg)
+    if main_metric is not None:
+        if main_metric not in values:
+            raise ValueError(f'Scorer не вернул указанную метрику {main_metric!r}.')
+        return float(values[main_metric])
+    if metric_agg in values:
+        return float(values[metric_agg])
+    if is_ner_micro_f1 and 'micro_f1' in values:
+        return float(values['micro_f1'])
+    key = f'{metric_agg}_{main_column}'
+    if key in values:
+        return float(values[key])
+    if len(values) == 1:
+        return float(next(iter(values.values())))
+    raise ValueError(f'Scorer не вернул единственное значение для метрики {metric_agg!r}.')
+
+
+def valtest_stat_significance_legacy(sampler: tp.Union[Sampler, tp.Dict],
                               scorer: tp.Optional[Scorer],
                               metric_agg: str,
                               data_type: str='test',

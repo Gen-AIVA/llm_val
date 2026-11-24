@@ -97,7 +97,7 @@
     "valtest_stat_significance": {
         "number": "2.3",
         "name": "Статистическая значимость различия значения ключевой метрики качества", 
-        "target": "llm_val.val_test.model_quality.valtest_stat_significance.valtest_stat_significance",
+        "target": "llm_val.val_test.model_quality.valtest_stat_significance.valtest_stat_significance_legacy",
         "block_key": "model_quality",
         "excel": {
             "Цель": "На тестовом датасете оценить статистическую значимость различия ключевой метрики (далее метрики) качества. ",
