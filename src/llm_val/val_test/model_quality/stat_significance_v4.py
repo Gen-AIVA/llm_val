@@ -13,8 +13,12 @@ from llm_val.utils.ner_metrics import split_entities_by_words
 from llm_val.utils.report_helper import semaphore_by_threshold
 
 
+VERSION = 'genai_v4'
+CACHE_VERSION = 2
 MIN_OBSERVATIONS = 101
-ID_COLUMNS = ('session_id', 'question_id', 'sample_id', 'example_id', 'id', 'question')
+ROUNDING_TOLERANCE = 8 * np.finfo(float).eps
+OBJECT_ID_COLUMNS = ('session_id', 'question_id', 'sample_id', 'example_id', 'id')
+ID_COLUMNS = (*OBJECT_ID_COLUMNS, 'question')
 COUNT_COLUMNS = ('tp', 'fp', 'fn', 'tn')
 TERMS = {
     'accuracy': ((1, 0, 0, 1), (1, 1, 1, 1)),
@@ -204,26 +208,28 @@ def _entity_counts(predicted, target, matching):
     return tp, fp, fn, 0
 
 
-def _mean_rows(frame, column):
+def _mean_rows(frame, column, id_column):
     if column is not None:
         values = pd.to_numeric(frame[column])
     elif 'metric_value' in frame:
         values = pd.to_numeric(frame['metric_value'])
     else:
-        candidates = frame.drop(columns=list(ID_COLUMNS), errors='ignore')
+        identifiers = ID_COLUMNS if id_column is None else (*ID_COLUMNS, id_column)
+        candidates = frame.drop(columns=list(identifiers), errors='ignore')
         if not len(candidates.columns):
             raise ValueError('Укажите main_column с пообъектной оценкой для метрики single_mean.')
-        values = candidates.apply(pd.to_numeric).mean(axis=1, skipna=False)
+        numeric = candidates.apply(pd.to_numeric)
+        values = numeric.iloc[:, 0] if numeric.shape[1] == 1 else numeric.mean(axis=1, skipna=False)
     if not np.isfinite(values.dropna().to_numpy(dtype=float)).all():
         raise ValueError('Пообъектные оценки должны быть конечными.')
     return values.to_frame('score')
 
 
-def _use_rows(frame, kind, main_column, positive_label, ner):
+def _use_rows(frame, kind, main_column, positive_label, ner, id_column):
     if kind in TERMS:
         return _classification_rows(frame, kind, main_column, positive_label, ner)
     if kind == 'mean':
-        return _mean_rows(frame, main_column)
+        return _mean_rows(frame, main_column, id_column)
     return frame
 
 
@@ -235,15 +241,34 @@ def _valid_rows(frame, kind, main_column):
     return pd.Series(True, index=frame.index)
 
 
+def _validate_independent_ids(sample, valid, id_column):
+    index_name = sample[0].index.name
+    named_index = (index_name,) if index_name is not None else ()
+    candidates = (id_column,) if id_column is not None else (*OBJECT_ID_COLUMNS, *named_index)
+    for column in candidates:
+        ids = _ids(*sample, column)
+        if ids is None:
+            continue
+        used_ids = ids[valid.to_numpy(dtype=bool)]
+        if used_ids.hasnans or not used_ids.is_unique:
+            raise ValueError(f'Идентификатор {column!r} должен быть уникальным и непустым в каждой выборке.')
+        return
+    if id_column is not None:
+        raise ValueError(f'Идентификатор {id_column!r} отсутствует или не сопоставлен с оценками.')
+
+
 def _samples(a, b, paired, kind, main_column, id_column, positive_label, ner):
     raw_a, raw_b = _align(a, b, id_column) if paired else (a[0], None if b is None else b[0])
-    rows_a = _use_rows(raw_a, kind, main_column, positive_label, ner)
+    rows_a = _use_rows(raw_a, kind, main_column, positive_label, ner, id_column)
     valid_a = _valid_rows(rows_a, kind, main_column)
+    if not paired:
+        _validate_independent_ids(a, valid_a, id_column)
     if raw_b is None:
         return rows_a.loc[valid_a], None
-    rows_b = _use_rows(raw_b, kind, main_column, positive_label, ner)
+    rows_b = _use_rows(raw_b, kind, main_column, positive_label, ner, id_column)
     valid_b = _valid_rows(rows_b, kind, main_column)
     if not paired:
+        _validate_independent_ids(b, valid_b, id_column)
         return rows_a.loc[valid_a], rows_b.loc[valid_b]
     valid = valid_a & valid_b
     if kind in TERMS:
@@ -266,8 +291,21 @@ def _ratio(counts, kind):
     return float((total @ numerator) / trials)
 
 
+def _centered_scores(scores, offset):
+    if pd.api.types.is_integer_dtype(scores) and isinstance(offset, (int, np.integer)):
+        return (scores.to_numpy(dtype=object) - int(offset)).astype(float)
+    return scores.to_numpy(dtype=float) - float(offset)
+
+
 def _mean(rows):
-    return float(rows['score'].mean())
+    scores = rows['score']
+    offset = scores.iloc[0]
+    return float(offset + _centered_scores(scores, offset).mean())
+
+
+def _mean_difference(a, b):
+    offset = b['score'].iloc[0]
+    return float(_centered_scores(a['score'], offset).mean() - _centered_scores(b['score'], offset).mean())
 
 
 def _finite_metric(rows, metric):
@@ -369,17 +407,25 @@ def _bootstrap_intervals(draws, estimate, ci_type):
     return interval_95, interval_99
 
 
+def _at_reference(value, reference):
+    return np.isclose(value, reference, rtol=ROUNDING_TOLERANCE, atol=0.0)
+
+
 def _tail(draws, reference, alternative):
-    lower = float(np.mean(draws <= reference))
-    upper = float(np.mean(draws >= reference))
+    ties = _at_reference(draws, reference)
+    lower = float(np.mean((draws < reference) | ties))
+    upper = float(np.mean((draws > reference) | ties))
     if alternative == 'two-sided':
         return min(1.0, 2 * min(lower, upper))
     return lower if alternative == 'greater' else upper
 
 
 def _bootstrap(comparison, kind, iterations, rng, ci_type):
-    estimate = comparison.estimate(comparison.a, comparison.b)
-    draws = _resample(comparison, iterations, rng, kind=kind)
+    statistic = comparison.estimate
+    if kind == 'mean' and comparison.b is not None:
+        statistic = _paired_mean_difference if comparison.paired else _mean_difference
+    estimate = statistic(comparison.a, comparison.b)
+    draws = _resample(comparison, iterations, rng, statistic, kind=kind)
     note = f'Эмпирическая доля по {iterations} бутстрэп-выборкам.'
     return Inference(
         _tail(draws, comparison.reference, comparison.alternative),
@@ -455,30 +501,51 @@ def _delta(comparison, kind):
     return Inference(float(tails[comparison.alternative]), estimate, *_intervals(estimate, error, stats.norm.ppf))
 
 
+def _paired_differences(a, b):
+    left, right = a['score'], b['score']
+    if pd.api.types.is_integer_dtype(left) and pd.api.types.is_integer_dtype(right):
+        return (left.to_numpy(dtype=object) - right.to_numpy(dtype=object)).astype(float)
+    return left.to_numpy(dtype=float) - right.to_numpy(dtype=float)
+
+
 def _median_difference(a, b):
-    return float(np.median(a['score'].to_numpy() - b['score'].to_numpy()))
+    return float(np.median(_paired_differences(a, b)))
+
+
+def _paired_mean_difference(a, b):
+    return float(np.mean(_paired_differences(a, b)))
 
 
 def _mean_test(comparison, method, iterations, rng, ci_type):
-    a = comparison.a['score'].to_numpy(dtype=float)
-    b = None if comparison.b is None else comparison.b['score'].to_numpy(dtype=float)
     reference, alternative = comparison.reference, comparison.alternative
     if method == 'wilcoxon':
-        differences = a - b - reference
+        paired_differences = _paired_differences(comparison.a, comparison.b)
+        ties = _at_reference(paired_differences, reference)
+        differences = np.where(ties, 0.0, paired_differences - reference)
         p_value = stats.wilcoxon(differences, alternative=alternative).pvalue if np.any(differences) else 1.0
-        estimate = _median_difference(comparison.a, comparison.b)
+        estimate = float(np.median(paired_differences))
         draws = _resample(comparison, iterations, rng, _median_difference)
         return Inference(
             p_value, estimate, *_bootstrap_intervals(draws, estimate, ci_type), 'Эффект — медиана парных разностей.'
         )
-    error = np.sqrt(np.var(a, ddof=1) / len(a) + np.var(b, ddof=1) / len(b)) if method == 'welch' else stats.sem(a)
+    a = comparison.a['score']
+    if method == 'welch':
+        b = comparison.b['score']
+        offset = b.iloc[0]
+        left, right = _centered_scores(a, offset), _centered_scores(b, offset)
+        error = np.hypot(stats.sem(left - left[0]), stats.sem(right))
+        estimate = float(left.mean() - right.mean())
+    else:
+        offset = a.iloc[0]
+        left = _centered_scores(a, offset)
+        error = stats.sem(left)
+        estimate = float(offset + left.mean())
     if not np.isfinite(error) or error == 0:
         raise UndefinedStatistic('t-критерий не определён при нулевой стандартной ошибке.')
     if method == 'welch':
-        result = stats.ttest_ind(a - reference, b, equal_var=False, alternative=alternative)
+        result = stats.ttest_ind(left - reference, right, equal_var=False, alternative=alternative)
     else:
-        result = stats.ttest_1samp(a, reference, alternative=alternative)
-    estimate = comparison.estimate(comparison.a, comparison.b)
+        result = stats.ttest_1samp(left, reference - float(offset), alternative=alternative)
     return Inference(result.pvalue, estimate, *_intervals(estimate, error, partial(stats.t.ppf, df=result.df)))
 
 
@@ -557,7 +624,8 @@ def _p_value_color(p_value, threshold):
     return semaphore_by_threshold(p_value, threshold, greater_is_better=False, right_border_is_bigger=False)
 
 
-def _report(results, *, is_info, semaphore_threshold):
+def report_significance(results, *, is_info, semaphore_threshold, significance_level, cache_version=CACHE_VERSION):
+    """Render computed comparisons and carry their calculation version into the cache."""
     rows = pd.DataFrame(
         {
             'Метрика': row['metric'],
@@ -583,11 +651,20 @@ def _report(results, *, is_info, semaphore_threshold):
     rows = rows.astype(object).where(rows.notna(), None)
     color = 'gray'
     if not is_info:
+        low, high = semaphore_threshold
+        if not 0 <= low < high <= 1:
+            raise ValueError('Границы светофора должны удовлетворять условию 0 ≤ low < high ≤ 1.')
         colors = [_p_value_color(row['p_value'], semaphore_threshold) for row in results]
         rows['Результат теста'] = colors
         color = colors[0]
     primary = results[0]
-    precomputed = {'p_value': primary['p_value'], 'methodology_version': 'genai_v4', 'comparisons': results}
+    precomputed = {
+        'p_value': primary['p_value'],
+        'methodology_version': VERSION,
+        'cache_version': cache_version,
+        'cached_significance_level': significance_level,
+        'comparisons': results,
+    }
     if primary['interval_95'] is not None:
         precomputed['ci_low'], precomputed['ci_high'] = primary['interval_95']
         precomputed['ci_low_99'], precomputed['ci_high_99'] = primary['interval_99']
@@ -601,15 +678,11 @@ def _interval_text(interval):
     return None if interval is None else f'[{interval[0]:.6g}, {interval[1]:.6g}]'
 
 
-def _validate_options(alternative, significance_level, is_info, semaphore_threshold, iterations, ci_type):
+def _validate_options(alternative, significance_level, iterations, ci_type):
     if alternative not in {None, 'greater', 'less', 'two-sided'}:
         raise ValueError(f'Неизвестное направление сравнения: {alternative!r}.')
     if significance_level is not None and not 0 < significance_level < 1:
         raise ValueError('Уровень значимости должен находиться между 0 и 1.')
-    if not is_info:
-        low, high = semaphore_threshold
-        if not 0 <= low < high <= 1:
-            raise ValueError('Границы светофора должны удовлетворять условию 0 ≤ low < high ≤ 1.')
     if iterations < 2 or ci_type not in {'percentile', 'basic', 'normal'}:
         raise ValueError('Для бутстрэпа нужны минимум две итерации и поддерживаемый тип интервала.')
 
@@ -645,7 +718,7 @@ def run_significance(
     semaphore_threshold,
 ):
     """Evaluate and render all requested hypotheses for the GenAI v4 test."""
-    _validate_options(alternative, significance_level, is_info, semaphore_threshold, iterations, ci_type)
+    _validate_options(alternative, significance_level, iterations, ci_type)
     if isinstance(methods, str):
         methods = (methods,)
     methods = tuple(dict.fromkeys(methods or ()))
@@ -659,7 +732,7 @@ def run_significance(
         is_paired = paired and hypothesis.compare_versions
         default = _default_method(kind, hypothesis.compare_versions, is_paired)
         selected, explicit_methods = _method_selection(default, methods, include_bootstrap, len(hypotheses) > 1, kind)
-        direction = 'less' if {'welch', 'wilcoxon'}.intersection(selected) else 'greater'
+        direction = 'less' if default in {'welch', 'wilcoxon'} else 'greater'
         if index == 0 and alternative is not None:
             direction = alternative
         pairs = baselines.items() if hypothesis.compare_versions else (('Бизнес-порог', None),)
@@ -680,7 +753,9 @@ def run_significance(
                     significance_level,
                 )
             )
-    return _report(results, is_info=is_info, semaphore_threshold=semaphore_threshold)
+    return report_significance(
+        results, is_info=is_info, semaphore_threshold=semaphore_threshold, significance_level=significance_level,
+    )
 
 
 def _result_rows(label, name, comparison, kind, methods, explicit_methods, iterations, rng, ci_type, alpha):

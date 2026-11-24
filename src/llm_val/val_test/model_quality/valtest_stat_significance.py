@@ -17,7 +17,15 @@ from llm_val.scorer.UniversalScorer import UniversalScorer
 from llm_val.utils.metrics import METRICS
 from llm_val.utils.ner_metrics import NER_METRICS
 from llm_val.utils.report_helper import semaphore_by_threshold
-from llm_val.val_test.model_quality.stat_significance_v4 import Hypothesis, NerMatching, TERMS, run_significance
+from llm_val.val_test.model_quality.stat_significance_v4 import (
+    CACHE_VERSION,
+    TERMS,
+    VERSION,
+    Hypothesis,
+    NerMatching,
+    report_significance,
+    run_significance,
+)
 from llm_val.val_test.model_quality.stat_significance_v4 import metric_kind as normalize_metric_kind
 
 
@@ -59,7 +67,7 @@ def report_valtest_stat_significance(p_value: float,
     return res_dict
 
 
-def valtest_stat_significance(sampler: tp.Union[Sampler, tp.Dict],
+def valtest_stat_significance(sampler: tp.Optional[tp.Union[Sampler, tp.Dict]],
                               scorer: tp.Optional[Scorer] = None,
                               metric_agg: str = 'single_mean',
                               data_type: str = 'test',
@@ -88,6 +96,11 @@ def valtest_stat_significance(sampler: tp.Union[Sampler, tp.Dict],
                               main_metric: tp.Optional[str] = None,
                               ner_exact_match: tp.Optional[bool] = None,
                               ner_ignore_repetitions: bool = False,
+                              methodology_version: tp.Optional[str] = None,
+                              cache_version: tp.Optional[int] = None,
+                              cached_significance_level: tp.Optional[float] = None,
+                              comparisons: tp.Optional[tp.List[tp.Dict[str, tp.Any]]] = None,
+                              cached_parameters: tp.Optional[tp.Dict[str, tp.Any]] = None,
                               **kwargs) -> tp.Dict[str, tp.Dict[str, tp.Any]]:
     """Run GenAI 5.3.4 with the v4 methodology.
 
@@ -107,8 +120,8 @@ def valtest_stat_significance(sampler: tp.Union[Sampler, tp.Dict],
     additional classification thresholds. For version comparisons, use
     extra_samplers and comparison_margin. For paired versions also set
     same_questions=True and provide a common id_column if it cannot be inferred.
-    The default direction follows the v4 method table: less for comparisons of
-    per-object numeric scores with Welch/Wilcoxon, greater for the other cases.
+    The default direction is less for comparisons of per-object means and
+    greater for the other cases, regardless of the selected methods.
     alternative applies to the primary hypothesis. Additional classification
     thresholds use the upper tail. A second threshold for the primary metric
     reuses the selected metric definition.
@@ -120,10 +133,58 @@ def valtest_stat_significance(sampler: tp.Union[Sampler, tp.Dict],
     the effect estimated by each method and explains how their results relate.
     The default is_info=True yields a gray result. With
     is_info=False, semaphore_threshold sets the p-value bounds (0.01 and 0.05
-    by default). The overall color follows the primary p-value. The precomputed
-    p_value argument is accepted for compatibility and the test recomputes it
-    from the supplied data.
+    by default). The overall color follows the primary p-value. Supply the
+    precomputed result for the same hypothesis to render it again. For legacy
+    calls, a scalar p_value renders the old report when no sampler or a
+    single_mean sampler without v4 options is supplied.
     """
+    parameters = {
+        'data_type': data_type, 'metric_agg': metric_agg, 'metric_kind': metric_kind, 'main_column': main_column,
+        'main_metric': main_metric, 'value_threshold': value_threshold, 'baseline_names': list(extra_samplers or {}),
+        'same_questions': same_questions, 'comparison_margin': comparison_margin, 'id_column': id_column,
+        'positive_label': positive_label, 'metric_thresholds': dict(metric_thresholds or {}),
+        'methods': [methods] if isinstance(methods, str) else list(methods or ()), 'alternative': alternative,
+        'bootstrap': bootstrap, 'bootstrap_iterations': bootstrap_iterations, 'bootstrap_ci_type': bootstrap_ci_type,
+        'random_state': random_state, 'ner_exact_match': ner_exact_match,
+        'ner_ignore_repetitions': ner_ignore_repetitions, 'custom_metric': calc_metric_fn is not None,
+    }
+    if methodology_version == VERSION and comparisons:
+        if sampler is None and significance_level not in (None, cached_significance_level):
+            raise ValueError('Для изменения уровня значимости передайте sampler.')
+        if sampler is None or (cache_version == CACHE_VERSION and cached_parameters == parameters
+                               and significance_level == cached_significance_level):
+            result = report_significance(
+                comparisons, is_info=is_info, semaphore_threshold=semaphore_threshold,
+                significance_level=cached_significance_level, cache_version=cache_version,
+            )
+            result['precomputed']['cached_parameters'] = cached_parameters
+            return result
+    v4_options = (
+        metric_kind is not None, metric_thresholds, comparison_margin, id_column is not None, positive_label != 1,
+        methods, significance_level is not None, main_metric is not None, ner_exact_match is not None,
+        ner_ignore_repetitions,
+    )
+    legacy_report = sampler is None or _metric_alias(metric_agg) == 'mean'
+    if legacy_report and methodology_version is None and p_value is not None and not any(v4_options):
+        if sampler is not None and bootstrap:
+            return valtest_stat_significance_legacy(
+                sampler=sampler, scorer=scorer, metric_agg=metric_agg, data_type=data_type, main_column=main_column,
+                value_threshold=value_threshold, extra_samplers=extra_samplers, same_questions=same_questions,
+                semaphore_threshold=semaphore_threshold, bootstrap=True, bootstrap_iterations=bootstrap_iterations,
+                bootstrap_ci_type=bootstrap_ci_type, alternative=alternative or 'greater',
+                exec_env='sberds' if isinstance(sampler, dict) else exec_env, random_state=random_state,
+                is_info=is_info, p_value=p_value, calc_metric_fn=calc_metric_fn,
+            )
+        intervals = {key: kwargs[key] for key in ('ci_low', 'ci_high', 'ci_low_99', 'ci_high_99') if key in kwargs}
+        return {
+            'report': report_valtest_stat_significance(
+                p_value=p_value, extra_samplers_keys=list(extra_samplers or {}), data_type=data_type,
+                semaphore_threshold=semaphore_threshold, is_info=is_info,
+            ),
+            'precomputed': {'p_value': p_value, **intervals},
+        }
+    if sampler is None:
+        raise ValueError('Для расчёта статистической значимости передайте sampler или сохранённые результаты.')
     baselines = {
         name: _significance_frames(sample, data_type, exec_env)
         for name, sample in (extra_samplers or {}).items()
@@ -151,13 +212,15 @@ def valtest_stat_significance(sampler: tp.Union[Sampler, tp.Dict],
                          is_ner_micro_f1=metric_name in _NER_MICRO_F1)
     primary = Hypothesis(metric_agg, kind, float(reference), metric, bool(baselines), main_column)
     hypotheses = [primary, *_additional_hypotheses(primary, metric_name, metric_thresholds, accuracy_column)]
-    return run_significance(
+    result = run_significance(
         frames, baselines, hypotheses,
         paired=same_questions, id_column=id_column, positive_label=positive_label, ner=ner,
         alternative=alternative, methods=methods, include_bootstrap=bootstrap, iterations=bootstrap_iterations,
         ci_type=bootstrap_ci_type, random_state=random_state, significance_level=significance_level,
         is_info=is_info, semaphore_threshold=semaphore_threshold,
     )
+    result['precomputed']['cached_parameters'] = parameters
+    return result
 
 
 def _additional_hypotheses(primary, metric_name, metric_thresholds, accuracy_column):

@@ -128,15 +128,13 @@ class Validation():
         '''
         func_signature = inspect.signature(func_test)
         func_params = func_signature.parameters
+        params = {**(prec_params or {}), **test_params}
         if 'scorer' in func_params:
-            test_res = func_test(sampler=self.sampler, 
+            test_res = func_test(sampler=self.sampler,
                                 scorer=self.scorer,
-                                **prec_params,
-                                **test_params)
+                                **params)
         else:
-            test_res = func_test(sampler=self.sampler, 
-                                **prec_params,
-                                **test_params)
+            test_res = func_test(sampler=self.sampler, **params)
         return test_res['report'], test_res['precomputed']
 
 

@@ -45,7 +45,8 @@ def _sampler(frame, x=None):
 
 
 def _comparison(a, **kwargs):
-    result = valtest_stat_significance(_sampler(a), bootstrap_iterations=40, **kwargs)
+    kwargs.setdefault('bootstrap_iterations', 40)
+    result = valtest_stat_significance(_sampler(a), **kwargs)
     assert result['report']['semaphore'] == 'gray'
     return result['precomputed']['comparisons'][0]
 
@@ -257,6 +258,36 @@ def test_mean_methods_and_retained_plots():
     assert isinstance(result['report']['result_plots'][0], matplotlib.figure.Figure)
 
 
+def test_constant_mean_at_threshold_has_no_significant_improvement():
+    """Rounding of a constant sample must not produce a false rejection."""
+    a = pd.DataFrame({'score': np.full(150, 0.7)})
+    result = valtest_stat_significance(
+        _sampler(a), main_column='score', value_threshold=0.7, bootstrap=True,
+        bootstrap_iterations=20, significance_level=0.05,
+    )
+    student, bootstrap = result['precomputed']['comparisons']
+    assert student['method_id'] == 'student'
+    assert student['p_value'] is None
+    assert 'нулевой стандартной ошибке' in student['comment']
+    assert bootstrap['p_value'] == 1.0
+    assert 'не отклоняется' in bootstrap['conclusion']
+    assert result['report']['semaphore'] == 'gray'
+
+
+def test_bootstrap_precision_difference_at_threshold_counts_as_tie():
+    """Treat 0.8 − 0.7 as the specified margin of 0.1 within floating-point error."""
+    a = pd.DataFrame({'tp': [8] * 125, 'fp': [2] * 125, 'fn': [0] * 125})
+    b = a.assign(tp=7, fp=3)
+    row = _comparison(
+        a, metric_agg='precision', extra_samplers={'B': _sampler(b)}, comparison_margin=0.1,
+        bootstrap_iterations=20, significance_level=0.05,
+    )
+    assert row['method_id'] == 'bootstrap'
+    assert row['estimate'] == pytest.approx(0.1)
+    assert row['p_value'] == 1.0
+    assert 'не отклоняется' in row['conclusion']
+
+
 def test_mean_comparison_methods():
     """Use the configured margin consistently in Wilcoxon and Welch."""
     ids = np.arange(125)
@@ -275,6 +306,115 @@ def test_mean_comparison_methods():
         assert result['method_id'] == ('wilcoxon' if paired else 'welch')
         assert result['p_value'] == pytest.approx(expected.pvalue)
         assert result['alternative'] == 'A − B < 0.025'
+
+
+@pytest.mark.parametrize(('paired', 'default_method'), [(False, 'welch'), (True, 'wilcoxon')])
+def test_bootstrap_alternative_does_not_depend_on_other_methods(paired, default_method):
+    """Keep the same mean-score hypothesis in one- and two-method reports."""
+    a = pd.DataFrame({'session_id': np.arange(125), 'score': np.linspace(0.75, 0.85, 125)})
+    b = a.assign(score=np.linspace(0.60, 0.70, len(a)))
+    params = {
+        'main_column': 'score', 'same_questions': paired, 'extra_samplers': {'B': _sampler(b)},
+        'bootstrap_iterations': 20, 'random_state': 42,
+    }
+    only = _comparison(a, methods=['bootstrap'], **params)
+    result = valtest_stat_significance(_sampler(a), methods=[default_method, 'bootstrap'], **params)
+    _, together = result['precomputed']['comparisons']
+    assert only['alternative'] == together['alternative'] == 'A − B < 0'
+    assert only['p_value'] == together['p_value'] == 1.0
+
+
+def test_wilcoxon_treats_pairs_at_margin_as_ties():
+    """A rounding error in every paired difference is compatible with H0."""
+    a = pd.DataFrame({'session_id': np.arange(125), 'score': 0.8})
+    b = a.assign(score=0.7)
+    row = _comparison(
+        a, main_column='score', extra_samplers={'B': _sampler(b)}, same_questions=True,
+        comparison_margin=0.1, alternative='greater', bootstrap_iterations=20,
+    )
+    assert row['method_id'] == 'wilcoxon'
+    assert row['p_value'] == 1.0
+
+
+def test_paired_effect_uses_signed_difference_for_unsigned_scores():
+    """Keep the effect, confidence interval and p-value consistent for uint scores."""
+    a = pd.DataFrame({'session_id': np.arange(125), 'score': np.zeros(125, dtype=np.uint8)})
+    b = a.assign(score=np.ones(len(a), dtype=np.uint8))
+    result = valtest_stat_significance(
+        _sampler(a), main_column='score', extra_samplers={'B': _sampler(b)}, same_questions=True,
+        methods=['wilcoxon', 'bootstrap'], bootstrap_iterations=20,
+    )
+    for row in result['precomputed']['comparisons']:
+        assert row['estimate'] == -1.0
+        assert row['interval_95'] == (-1.0, -1.0)
+        assert row['p_value'] < 0.05
+
+
+def test_large_common_offset_is_removed_before_mean_comparison():
+    """Keep a difference of one at a common score level of 10**16."""
+    a = pd.DataFrame({'score': np.repeat([1e16, 1e16 + 2], 64)})
+    b = a.assign(score=1e16)
+    result = valtest_stat_significance(
+        _sampler(a), main_column='score', extra_samplers={'B': _sampler(b)}, alternative='greater',
+        methods=['welch', 'bootstrap'], bootstrap_iterations=20,
+    )
+    for row in result['precomputed']['comparisons']:
+        assert row['estimate'] == 1.0
+        assert row['interval_95'][0] > 0
+        assert row['p_value'] < 0.05
+
+
+@pytest.mark.parametrize('compare_versions', [False, True])
+def test_repeated_objects_are_rejected_in_independent_samples(compare_versions):
+    """Repeated scores for ten IDs cannot be counted as 150 independent observations."""
+    a = pd.DataFrame({'session_id': np.repeat(np.arange(10), 15), 'metric_value': np.tile([0, 1, 1], 50)})
+    if compare_versions:
+        kwargs = {'extra_samplers': {'B': _sampler(a)}}
+        a = a.assign(session_id=np.arange(len(a)))
+    else:
+        kwargs = {'id_column': 'session_id'}
+    with pytest.raises(ValueError, match="'session_id' должен быть уникальным"):
+        _comparison(a, metric_agg='accuracy', **kwargs)
+
+
+def test_named_index_and_explicit_identifier_are_treated_as_ids():
+    """Check named object indices and exclude an ID column from a mean score."""
+    a = pd.DataFrame({'object_key': np.arange(128), 'score': np.linspace(0, 1, 128)})
+    row = _comparison(a, id_column='object_key')
+    assert row['estimate'] == pytest.approx(0.5)
+    repeating = a.assign(object_key=np.arange(len(a)) // 8).set_index('object_key')
+    with pytest.raises(ValueError, match="'object_key' должен быть уникальным"):
+        _comparison(repeating)
+
+
+@pytest.mark.parametrize('bootstrap', [False, True])
+def test_saved_mean_p_value_preserves_the_legacy_report(bootstrap):
+    """A legacy scalar can be displayed even with the source sampler present."""
+    a = pd.DataFrame({'score': np.linspace(0, 1, 125)})
+    result = valtest_stat_significance(
+        _sampler(a), main_column='score', value_threshold=0.65, p_value=0.001, bootstrap=bootstrap,
+        bootstrap_iterations=20, random_state=42,
+    )
+    assert result['precomputed']['p_value'] == 0.001
+    assert result['report']['semaphore'] == 'gray'
+    assert bool(result['report']['result_plots']) is bootstrap
+
+
+def test_saved_v4_comparisons_are_reused_with_sampler():
+    """Recreate the statistical table and the figure from the cached comparisons."""
+    a = pd.DataFrame({'score': np.linspace(0.3, 0.9, 125)})
+    original = valtest_stat_significance(_sampler(a), main_column='score', significance_level=0.05)
+    saved = original['precomputed']
+    restored = valtest_stat_significance(SimpleNamespace(), main_column='score', significance_level=0.05, **saved)
+    assert restored['precomputed'] == saved
+    assert restored['report']['semaphore'] == 'gray'
+    assert len(restored['report']['result_plots']) == len(original['report']['result_plots'])
+    pd.testing.assert_frame_equal(
+        restored['report']['result_dataframes'][0], original['report']['result_dataframes'][0],
+    )
+    changed = valtest_stat_significance(_sampler(a), main_column='score', significance_level=0.05,
+                                        value_threshold=0.9, **saved)
+    assert changed['precomputed']['p_value'] > 0.95
 
 
 def test_custom_metric_paired_bootstrap():
