@@ -16,7 +16,8 @@ def as_label_set(value):
     return frozenset(value)
 
 
-def _canonical_integers(labels: pd.Series) -> Optional[pd.Series]:
+def canonical_integer_labels(labels: pd.Series) -> Optional[pd.Series]:
+    """Decode integer strings that retain their identity under a round trip."""
     if pd.api.types.infer_dtype(labels) != 'string':
         return None
     integers = pd.to_numeric(labels, errors='coerce')
@@ -40,7 +41,7 @@ def aggregate_dawid_skene(
     set_labels = labels.map(lambda value: isinstance(value, SET_LABEL_TYPES)).any()
     if set_labels:
         labels = labels.map(lambda value: as_label_set(value) if isinstance(value, SET_LABEL_TYPES) else value)
-    integers = _canonical_integers(labels)
+    integers = canonical_integer_labels(labels)
     labels_to_encode = labels if integers is None else integers
     # Keep the natural class order for scalar labels and a stable order for sets.
     try:

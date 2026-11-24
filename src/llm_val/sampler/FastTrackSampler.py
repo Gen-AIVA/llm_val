@@ -19,6 +19,7 @@ class FastTrackSampler(Sampler):
             test: Тестовый набор данных в wide-формате
             n_iter: Количество итераций Dawid-Skene
         '''
+        self._n_iter = n_iter
         test = self._preproc(test, n_iter)
         super().__init__(test=test)
 
@@ -40,9 +41,27 @@ class FastTrackSampler(Sampler):
         x_data = self._wide_to_long(df, assessor_groups, other_columns)
         metric_columns = [col for col in x_data.columns
                           if col.endswith('_metric')]
-        y_data = self._aggregate_dawid_skene(
-            x_data, metric_columns, n_iter)
+        labels = self._aggregate_dawid_skene(x_data, metric_columns, n_iter)
+        y_data = pd.DataFrame()
+        for metric_col, scores in labels.items():
+            y_data[metric_col] = scores
+        y_data.index.name = 'session_id'
         return {'X': x_data, 'y': y_data}
+
+    @property
+    def final_labels(self) -> pd.DataFrame:
+        """Include final labels for sessions outside the scoring basket."""
+        x_data, y_data = self.test['X'], self.test['y']
+        metrics = [column for column in y_data if column in x_data and column.endswith('_metric')]
+        omitted = x_data.loc[~x_data['session_id'].isin(y_data.index), metrics]
+        metrics = omitted.columns[omitted.notna().any()].tolist()
+        if not metrics or y_data.index.name != 'session_id':
+            return y_data
+        labels = self._aggregate_dawid_skene(x_data, metrics, getattr(self, '_n_iter', 100))
+        additional = pd.DataFrame({
+            name: scores.loc[~scores.index.isin(y_data.index)].astype(object) for name, scores in labels.items()
+        })
+        return pd.concat([y_data.astype(object), additional]).rename_axis('session_id')
 
     def _split_columns(self,
                        df: pd.DataFrame) -> tp.Tuple[tp.Dict, tp.List[str]]:
@@ -91,7 +110,7 @@ class FastTrackSampler(Sampler):
     def _aggregate_dawid_skene(self,
                                x_data: pd.DataFrame,
                                metric_columns: tp.List[str],
-                               n_iter: int) -> pd.DataFrame:
+                               n_iter: int) -> tp.Dict[str, pd.Series]:
         '''
         Агрегация меток асессоров с помощью Dawid-Skene
         Parameters:
@@ -99,14 +118,14 @@ class FastTrackSampler(Sampler):
             metric_columns: Список колонок с метриками
             n_iter: Количество итераций Dawid-Skene
         Return:
-            DataFrame с агрегированными метками по session_id
+            Агрегированные по session_id метки каждого критерия
         '''
-        y_data = pd.DataFrame()
+        final_labels = {}
         for metric_col in metric_columns:
             long_df = x_data[['session_id', 'assessor_id', metric_col]].rename(columns={
                 'session_id': 'task',
                 'assessor_id': 'worker',
                 metric_col: 'label'
             })
-            y_data[metric_col] = aggregate_dawid_skene(long_df, n_iter=n_iter, numeric_strings=True)
-        return y_data.rename_axis('session_id')
+            final_labels[metric_col] = aggregate_dawid_skene(long_df, n_iter=n_iter, numeric_strings=True)
+        return final_labels

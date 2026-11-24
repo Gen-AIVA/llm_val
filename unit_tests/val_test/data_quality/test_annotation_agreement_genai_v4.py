@@ -1,5 +1,6 @@
-from types import ModuleType, SimpleNamespace
+import json
 import sys
+from types import ModuleType, SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -70,6 +71,19 @@ def test_ordinal_cohen_uses_declared_order_and_weights():
     assert row['value'] == pytest.approx(1 - observed / expected)
 
 
+@pytest.mark.parametrize('as_text', [False, True])
+def test_numeric_ratings_default_to_ordinal(as_text):
+    """Weight the disagreement on a numeric scale unless a nominal scale is declared."""
+    tables = _tables([[0, 0], [1, 2], [2, 2], [0, 2]], [0, 1, 2, 2])
+    if as_text:
+        tables['X'][COLUMN] = tables['X'][COLUMN].astype(str)
+    (ordinal,) = _rows(_run(tables))
+    assert ordinal['check'] == f'{COHEN} (linear)'
+    assert ordinal['value'] == pytest.approx(1 / 3)
+    (nominal,) = _rows(_run(tables, criteria_specs={COLUMN: {'scale': 'nominal'}}), COHEN)
+    assert nominal['value'] == pytest.approx(3 / 11)
+
+
 @pytest.mark.parametrize(('scale', 'expected'), [('ordinal', 2 / 7), ('interval', 4 / 29)])
 def test_non_nominal_krippendorff(scale, expected):
     """Verify ordinal and interval distances on the same incomplete ratings."""
@@ -78,6 +92,14 @@ def test_non_nominal_krippendorff(scale, expected):
     (row,) = _rows(result)
     assert row['check'] == f'{ALPHA} ({scale})'
     assert row['value'] == pytest.approx(expected)
+
+
+def test_interval_alpha_is_invariant_to_a_large_common_shift():
+    """Keep the original distances after subtracting a common integer offset."""
+    offset = 10**16
+    tables = _tables([[offset, offset], [offset, offset], [offset + 2, offset + 4]])
+    (row,) = _rows(_run(tables, criteria_specs={COLUMN: {'scale': 'interval'}}))
+    assert row['value'] == pytest.approx(16 / 21)
 
 
 @pytest.mark.parametrize(
@@ -127,10 +149,16 @@ def test_imbalanced_ac1_does_not_weight_objects_by_number_of_ratings():
     assert row['value'] == pytest.approx((observed - chance) / (1 - chance))
 
 
-def test_final_labels_are_carried_through_sberds_mapping():
-    """Accept a keyed y serialized by DataFrame.to_dict."""
+@pytest.mark.parametrize('as_json', [False, True])
+def test_final_labels_are_carried_through_sberds_mapping(as_json):
+    """Align the supplied final labels with numeric session IDs after serialization."""
     tables = _tables([[0, 0]] * 24 + [[0, 1]], [0] * 24 + [1])
+    tables['X']['session_id'] += 17
+    tables['y'].index += 17
     payload = {name: table.to_dict() for name, table in tables.items()}
+    payload['y'][COLUMN][999] = 1
+    if as_json:
+        payload = json.loads(json.dumps(payload))
     native = _run(tables)['precomputed']
     serialized = valtest_annotation_quality_agent({'test': payload}, exec_env='sberds')['precomputed']
     assert serialized == native
@@ -164,7 +192,7 @@ def test_class_agreement_examples(original_votes, final, initial_count, expected
 def test_extreme_excludes_both_tails_and_retains_non_extreme_class():
     """Calculate within-class agreement only for eligible classes."""
     final = [0] * 95 + [1] * 4 + [2] + [0] * 100
-    result = _run(_tables([[label, label] for label in final], final))
+    result = _run(_tables([[label, label] for label in final], final), criteria_specs={COLUMN: {'scale': 'nominal'}})
     rows = {row['label']: row for row in _rows(result, CLASS_AGREEMENT)}
     assert rows['2']['target_rate'] == 0.005
     assert rows['2']['value'] is None
@@ -191,7 +219,7 @@ def test_novel_adjudication_changes_main_overlap():
     paired = _run(_tables(ratings, [0, 0, 1, 1], initial_count=2))
     assert _rows(paired, COHEN)[0]['n_assessors'] == 2
     ratings[0][2] = 2
-    partial = _run(_tables(ratings, [0, 0, 1, 1], initial_count=2))
+    partial = _run(_tables(ratings, [0, 0, 1, 1], initial_count=2), criteria_specs={COLUMN: {'scale': 'nominal'}})
     (main,) = _rows(partial, ALPHA)
     assert main['overlap'] == 'неполное'
     assert main['n_assessors'] == 3
@@ -199,9 +227,18 @@ def test_novel_adjudication_changes_main_overlap():
     assert 'Новых меток арбитров: 1' in main['comment']
 
 
+def test_novel_adjudicator_contributes_all_their_votes():
+    """Use the same adjudicator's repeated and novel labels in the main statistic."""
+    ratings = [[0, 1, 2], [0, 1, 0], [0, 0], [0, 0], [1, 1], [1, 1]]
+    tables = _tables(ratings, [0, 0, 0, 0, 1, 1], initial_count=2)
+    (row,) = _rows(_run(tables, criteria_specs={COLUMN: {'scale': 'nominal'}}), ALPHA)
+    assert row['value'] == pytest.approx(9 / 22)
+
+
 def test_novel_adjudication_never_enters_class_agreement():
     """Compute class-level agreement using the initial pair only."""
-    result = _run(_tables([[0, 0]] * 24 + [[1, 1, 2]], [0] * 24 + [1], initial_count=2))
+    tables = _tables([[0, 0]] * 24 + [[1, 1, 2]], [0] * 24 + [1], initial_count=2)
+    result = _run(tables, criteria_specs={COLUMN: {'scale': 'nominal'}})
     (rare,) = [row for row in _rows(result, CLASS_AGREEMENT) if row['label'] == '1']
     assert rare['value'] == 1
     assert _rows(result, GWET)[0]['value'] < 1
@@ -277,13 +314,14 @@ def test_jaccard_uses_ratings_and_checks_the_declared_categories():
 
 def test_multilabel_adjudicator_novelty_is_rechecked_for_each_label():
     """A new label set can repeat a vote for x while introducing one for y."""
-    ratings = [[['x'], [], ['x', 'y']], [['x'], ['x']], [['y'], ['y']], [[], []]]
+    ratings = [[['x'], [], ['x', 'y']], [['x'], ['x'], ['x']], [['y'], ['y']], [[], []]]
     result = _run(_tables(ratings, [['x'], ['x'], ['y'], []], initial_count=2))
     main = {row['label']: row for row in _rows(result) if row['primary']}
     assert main['x']['check'] == COHEN
     assert main['x']['n_assessors'] == 2
     assert main['y']['check'] == ALPHA
     assert main['y']['n_assessors'] == 3
+    assert main['y']['value'] == pytest.approx(4 / 7)
 
 
 @pytest.fixture
@@ -351,9 +389,11 @@ def test_fasttrack_sampler_preserves_rating_categories(dawid_skene_inputs, first
     assert set(ratings['label']) == {0, 1}
 
 
-def test_fasttrack_sampler_keeps_first_criterion_sessions(dawid_skene_inputs):
-    """Extra criteria cannot add missing primary scores to an existing basket."""
+def test_fasttrack_sampler_keeps_final_labels_for_all_criteria(dawid_skene_inputs):
+    """Use the second criterion's full label set when the first lacks an object."""
     from llm_val.sampler.FastTrackSampler import FastTrackSampler
+    from llm_val.scorer.UniversalScorer import UniversalScorer
+    from llm_val.utils.metrics import METRICS
 
     wide = pd.DataFrame(
         {
@@ -365,10 +405,18 @@ def test_fasttrack_sampler_keeps_first_criterion_sessions(dawid_skene_inputs):
             f'{COLUMN}_asessor_2': [0, 1, 1],
         }
     )
-    scores = FastTrackSampler(wide).test['y']
-    assert scores.index.tolist() == [17, 25]
-    assert scores['final_metric'].tolist() == [1, 1]
-    assert scores[COLUMN].tolist() == [0, 1]
+    sampler = FastTrackSampler(wide)
+    assert sampler.test['y'].index.tolist() == [17, 25]
+    scorer = UniversalScorer({'single_mean': METRICS['single_mean']})
+    assert scorer.calc(sampler)['single_mean_final_metric'] == 1.0
+    finals = sampler.final_labels
+    assert finals[COLUMN].to_dict() == {17: 0, 25: 1, 49: 1}
+    assert pd.isna(finals.loc[49, 'final_metric'])
+    rows = _rows(valtest_annotation_quality_agent(sampler, metric_columns=[COLUMN]), 'Target rate')
+    assert {row['label']: row['target_rate'] for row in rows} == pytest.approx({'0': 1 / 3, '1': 2 / 3})
+    sampler.test['y'].loc[25, COLUMN] = 0
+    rows = _rows(valtest_annotation_quality_agent(sampler, metric_columns=[COLUMN]), 'Target rate')
+    assert {row['label']: row['target_rate'] for row in rows} == pytest.approx({'0': 2 / 3, '1': 1 / 3})
 
 
 def test_multilabel_final_label_sources_use_same_aggregation(dawid_skene_inputs):
@@ -424,3 +472,32 @@ def test_exact_color_boundaries_after_fleiss_arithmetic(votes, final, value, col
     result = _run(_tables(votes, final), is_info=False)
     assert _rows(result, FLEISS)[0]['value'] == pytest.approx(value)
     assert result['report']['semaphore'] == color
+
+
+def test_explicit_legacy_kappa_threshold_is_applied_in_rated_mode():
+    """Handle a method-specific threshold without changing the informational default."""
+    tables = _tables([[0, 0], [1, 1], [1, 0], [0, 0]], [0, 1, 1, 0])
+    options = {'semaphore_threshold_cohen': (0.1, 0.45)}
+    assert _run(tables, **options)['report']['semaphore'] == 'gray'
+    assert _run(tables, is_info=False, **options)['report']['semaphore'] == 'green'
+
+
+def test_saved_agreement_can_be_reused_with_sampler():
+    """Render cached statistics through the standard validation call signature."""
+    tables = _tables([[0, 0], [1, 1], [1, 0], [0, 0]], [0, 1, 1, 0])
+    cache = _run(tables)['precomputed']
+    sampler = SimpleNamespace()
+    result = valtest_annotation_quality_agent(sampler, **cache, is_info=False)
+    assert result['precomputed'] == cache
+    assert result['report']['semaphore'] == 'yellow'
+    changed = _run(tables, criteria_specs={COLUMN: {'scale': 'ordinal'}}, **cache)
+    (weighted,) = _rows(changed)
+    assert weighted['check'] == f'{COHEN} (linear)'
+
+
+def test_legacy_saved_agreement_can_be_rendered_without_sampler():
+    """Accept the previous release's saved row format in informational mode."""
+    rows = [{'criterion': COLUMN, 'check': COHEN, 'value': 0.5}]
+    result = valtest_annotation_quality_agent(None, criteria_stats=rows)
+    assert result['precomputed']['criteria_stats'] == rows
+    assert result['report']['semaphore'] == 'gray'

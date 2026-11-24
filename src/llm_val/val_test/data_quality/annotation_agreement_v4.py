@@ -6,11 +6,17 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import cohen_kappa_score
 
-from llm_val.utils.annotation_aggregation import SET_LABEL_TYPES, aggregate_dawid_skene, as_label_set
+from llm_val.utils.annotation_aggregation import (
+    SET_LABEL_TYPES,
+    aggregate_dawid_skene,
+    as_label_set,
+    canonical_integer_labels,
+)
 from llm_val.utils.report_helper import semaphore_by_threshold, worst_semaphore
 
 
 VERSION = 'genai_v4'
+CACHE_VERSION = 2
 IDS = ['session_id', 'assessor_id']
 COHEN = 'Каппа Коэна'
 FLEISS = 'Каппа Флейса'
@@ -55,13 +61,16 @@ def _criterion(series, options):
     scale = options.get('scale')
     assumed = scale is None and not ordered
     if scale is None:
-        scale = (
-            'ordinal'
-            if ordered
-            else 'multilabel'
-            if any(isinstance(value, SET_LABEL_TYPES) for value in series)
-            else 'nominal'
-        )
+        scale = 'nominal'
+        if ordered:
+            scale = 'ordinal'
+        elif any(isinstance(value, SET_LABEL_TYPES) for value in series):
+            scale = 'multilabel'
+        elif series.nunique() > 2 and (
+            pd.api.types.infer_dtype(series) in {'integer', 'floating', 'mixed-integer-float'}
+            or canonical_integer_labels(series.dropna()) is not None
+        ):
+            scale = 'ordinal'
     if scale not in SCALES:
         raise ValueError(f'Неизвестная шкала: {scale!r}.')
     categories = tuple(options.get('categories', list(series.cat.categories) if ordered else ()))
@@ -164,7 +173,8 @@ def _select_ratings(data, column, scale, *, sessions, dynamic, flag, order):
             ]
         ]
         if len(novel):
-            main = _build_matrix(pd.concat([initial, novel]), sessions)
+            independent = further.loc[further['assessor_id'].isin(novel['assessor_id'])]
+            main = _build_matrix(pd.concat([initial, independent]), sessions)
             return Ratings(matrix, main, aggregation, False, len(novel))
     return Ratings(matrix, matrix, aggregation, bool(matrix.notna().all().all()), 0)
 
@@ -224,8 +234,16 @@ def _cohen(matrix, categories, weights=None):
 
 
 def _alpha_interval(rows):
+    origin = rows[0][0]
+    groups = [np.asarray([value - origin for value in row], dtype=float) for row in rows]
+    scale = max(np.abs(group).max() for group in groups)
+    if scale == 0:
+        return None
+    if np.isinf(scale):
+        scale = max(abs(value) for row in rows for value in row)
+        groups = [np.asarray(row, dtype=float) for row in rows]
+    groups = [group / scale for group in groups]
     # Ordered pair squared differences sum to twice n times the centred sum of squares.
-    groups = [np.asarray(row, dtype=float) for row in rows]
     merged = np.concatenate(groups)
     expected = 2 * len(merged) * np.square(merged - merged.mean()).sum() / (len(merged) - 1)
     observed = sum(2 * len(group) * np.square(group - group.mean()).sum() / (len(group) - 1) for group in groups)
@@ -286,6 +304,9 @@ def _categories(matrix, spec):
             raise ValueError('Обнаружены метки вне заданного набора категорий.')
         return spec.categories
     if spec.scale == 'ordinal':
+        strings = canonical_integer_labels(pd.Series(list(observed)))
+        if strings is not None:
+            return tuple(sorted(observed, key=int))
         if not all(isinstance(v, (int, float, np.number)) for v in observed):
             raise UnavailableAgreement('Для нечисловой порядковой шкалы нужен заданный порядок категорий.')
         return tuple(sorted(observed))
@@ -412,18 +433,21 @@ def _binary_matrix(matrix, label):
 
 def _binary_ratings(ratings, label):
     initial = _binary_matrix(ratings.initial, label)
-    main = _binary_matrix(ratings.main, label)
     if not ratings.novel:
-        return replace(ratings, initial=initial, main=main)
-    initial_with_all_raters = initial.reindex(columns=main.columns)
-    additional = main.where(initial_with_all_raters.isna())
+        return replace(ratings, initial=initial, main=initial)
+    aggregation = _binary_matrix(ratings.aggregation, label)
+    initial_with_all_raters = initial.reindex(columns=aggregation.columns)
+    additional = aggregation.where(initial_with_all_raters.isna())
+    novel = additional
     for vote in (0, 1):
         repeated = additional.eq(vote).mul(initial.eq(vote).any(axis=1), axis=0)
-        additional = additional.mask(repeated)
-    count = int(additional.notna().sum().sum())
+        novel = novel.mask(repeated)
+    unique = novel.notna()
+    count = int(unique.sum().sum())
     if not count:
         return replace(ratings, initial=initial, main=initial, full=bool(initial.notna().all().all()), novel=0)
-    main = initial_with_all_raters.combine_first(additional).dropna(axis=1, how='all')
+    independent = additional.loc[:, unique.any(axis=0)]
+    main = initial.combine_first(independent)
     return replace(ratings, initial=initial, main=main, full=False, novel=count)
 
 
@@ -515,7 +539,8 @@ def _criterion_results(data, final, column, options, *, sessions, dynamic, flag,
 def _color(value, method, thresholds):
     if value is None:
         return 'gray'
-    low, high = thresholds['class' if method in {GWET, CLASS_AGREEMENT} else 'coefficient']
+    group = 'class' if method in {GWET, CLASS_AGREEMENT} else 'coefficient'
+    low, high = thresholds.get(method.partition(' (')[0], thresholds[group])
     # Allow rounding noise from the coefficient arithmetic at inclusive boundaries.
     for bound in (low, high):
         if abs(value - bound) <= 8 * np.finfo(float).eps:
@@ -524,7 +549,7 @@ def _color(value, method, thresholds):
     return semaphore_by_threshold(value, (low, high), left_border_is_bigger=False, right_border_is_bigger=False)
 
 
-def report_agreement(rows, *, is_info, thresholds):
+def report_agreement(rows, *, is_info, thresholds, cache_version=CACHE_VERSION):
     """Build the library result and summarize the worst primary color."""
     colored_rows = [(row, 'gray' if is_info else _color(row['value'], row['check'], thresholds)) for row in rows]
     primary = [color for row, color in colored_rows if row['primary']]
@@ -555,7 +580,7 @@ def report_agreement(rows, *, is_info, thresholds):
             'result_plots': [],
             'result_dataframes': [table.astype(object).where(table.notna(), None)],
         },
-        'precomputed': {'criteria_stats': rows, 'methodology_version': VERSION},
+        'precomputed': {'criteria_stats': rows, 'methodology_version': VERSION, 'cache_version': cache_version},
     }
 
 
