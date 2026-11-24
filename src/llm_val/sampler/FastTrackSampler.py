@@ -1,8 +1,9 @@
 import typing as tp
 import pandas as pd
 
+from crowdkit.aggregation import DawidSkene
+
 from llm_val.sampler.Sampler import Sampler
-from llm_val.utils.annotation_aggregation import aggregate_dawid_skene
 
 
 class FastTrackSampler(Sampler):
@@ -103,10 +104,15 @@ class FastTrackSampler(Sampler):
         '''
         y_data = pd.DataFrame()
         for metric_col in metric_columns:
-            long_df = x_data[['session_id', 'assessor_id', metric_col]].rename(columns={
+            long_df = x_data[['session_id', 'assessor_id', metric_col]].dropna(
+                subset=[metric_col])
+            long_df = long_df.rename(columns={
                 'session_id': 'task',
                 'assessor_id': 'worker',
                 metric_col: 'label'
             })
-            y_data[metric_col] = aggregate_dawid_skene(long_df, n_iter=n_iter, numeric_strings=True)
-        return y_data.rename_axis('session_id')
+            long_df['label'] = long_df['label'].astype(int)
+            model = DawidSkene(n_iter=n_iter)
+            y_data[metric_col] = model.fit_predict(long_df)
+        y_data.index.name = 'session_id'
+        return y_data

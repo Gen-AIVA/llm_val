@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from llm_val.val_test.data_quality.valtest_annotation_quality_agent import (
     report_valtest_annotation_quality_agent,
-    valtest_annotation_quality_agent_legacy as valtest_annotation_quality_agent,
+    valtest_annotation_quality_agent,
     classify_annotation_type,
     select_agreement_check,
     compute_agreement_stats,

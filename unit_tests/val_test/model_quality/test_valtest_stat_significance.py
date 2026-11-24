@@ -12,9 +12,7 @@ from llm_val.sampler.BinaryClassSampler import BinaryClassSampler
 from llm_val.sampler.MMLUSampler import MMLUSampler
 from llm_val.sampler.MultiCriterionSampler import MultiCriterionSampler
 from llm_val.scorer.BinaryClassScorer import BinaryClassScorer
-from llm_val.val_test.model_quality.valtest_stat_significance import (
-    valtest_stat_significance_legacy as valtest_stat_significance,
-)
+from llm_val.val_test.model_quality.valtest_stat_significance import valtest_stat_significance
 
 
 DATA_PATH = 'data/data_mmlu.pkl'
@@ -398,7 +396,6 @@ def test_strategy_is_empirical_for_both_branches(mock_ci, mock_p_value, scorer, 
                               metric_agg=metric_agg,
                               data_type='test',
                               main_column='metric_value',
-                              calc_metric_fn=(lambda frame: frame['metric_value'].mean()) if scorer is None else None,
                               bootstrap=True,
                               bootstrap_iterations=10,
                               random_state=42)
