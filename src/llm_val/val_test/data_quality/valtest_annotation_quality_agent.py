@@ -9,7 +9,7 @@ from sklearn.metrics import cohen_kappa_score
 from llm_val.sampler.FastTrackSampler import FastTrackSampler
 from llm_val.sampler.Sampler import Sampler
 from llm_val.utils.report_helper import semaphore_by_threshold, worst_semaphore
-from llm_val.val_test.data_quality.annotation_agreement_v4 import (
+from llm_val.val_test.data_quality.annotation_agreement import (
     ALPHA,
     CACHE_VERSION,
     COHEN,
@@ -27,8 +27,8 @@ def report_valtest_annotation_quality_agent(criteria_stats: tp.List[tp.Dict[str,
                                             semaphore_threshold_fleiss: tp.Tuple[float, float]=(0.4, 0.8),
                                             is_info: bool=False) -> tp.Dict[str, tp.Any]:
     '''
-    Создание report'а в соответствии с концепцией llm_val
-    Parameters:
+    Формирует отчёт в формате llm_val.
+    Параметры:
         criteria_stats: Список словарей по критериям с ключами 'criterion',
             'check' и 'value'
         semaphore_threshold_spear: Границы светофора для корреляции Спирмена
@@ -36,8 +36,8 @@ def report_valtest_annotation_quality_agent(criteria_stats: tp.List[tp.Dict[str,
         semaphore_threshold_cohen: Границы светофора для Каппы Коэна
         semaphore_threshold_fleiss: Границы светофора для Каппы Флейса
         is_info: True, если тест информативный
-    Return:
-        report в соответствии с концепцией llm_val
+    Результат:
+        Отчёт в формате llm_val.
     '''
     thresholds = {'Попарный коэф. Спирмена': semaphore_threshold_spear,
                   'Альфа Криппендорфа': semaphore_threshold_krip,
@@ -86,28 +86,30 @@ def valtest_annotation_quality_agent(sampler: tp.Optional[tp.Union[Sampler, tp.D
                                      cache_version: tp.Optional[int] = None,
                                      cached_parameters: tp.Optional[tp.Dict[str, tp.Any]] = None,
                                      **kwargs) -> tp.Dict[str, tp.Dict[str, tp.Any]]:
-    """Evaluate inter-rater agreement according to GenAI methodology 5.3.2 v4.
+    """Оценивает согласованность асессоров по тесту 5.3.2 методики GenAI.
 
-    Supply criteria_specs by column with scale (nominal, ordinal, interval or
-    multilabel), categories, optional Cohen weights (linear/quadratic), and the
-    multilabel_method (per_label/jaccard). Use ordered categories for text labels.
-    Numeric labels and canonical integer strings with more than two observed
-    values default to ordinal.
+    В criteria_specs для каждого столбца задаются шкала (nominal, ordinal,
+    interval или multilabel), категории, веса каппы Коэна (linear или quadratic)
+    и способ расчёта для многометочной разметки (per_label или jaccard).
+    Порядок текстовых меток задаётся списком категорий. По умолчанию три
+    и более разных числовых меток дают порядковую шкалу. Это относится
+    и к строкам с канонической записью целых чисел, например '0', '1', '2'.
 
-    Final Dawid–Skene labels come from the matching sampler y columns keyed by
-    session_id or from final_labels. If unavailable, the test can fit a
-    Dawid–Skene aggregation on all valid ratings, including adjudicators.
+    Финальные метки Дэвида–Скина передаются через y семплера с идентификатором
+    session_id или через final_labels. При их отсутствии тест агрегирует все
+    валидные оценки, включая оценки арбитров.
 
-    For dynamic coverage, use an is_initial column or mark the first two
-    independent ratings through initial_rating_column or rating_order_column.
-    All votes of an adjudicator who introduces a new label enter the main
-    calculation with partial overlap.
-    Class-level agreement uses the initial ratings.
+    При динамическом перекрытии первоначальные оценки отмечаются в is_initial
+    или в столбце initial_rating_column. Порядок оценок можно задать через
+    rating_order_column. Тогда первоначальными считаются первые две оценки.
+    Если арбитр выставил новую метку, все его оценки по критерию входят в
+    основной расчёт для неполного перекрытия. Согласованность по классам
+    рассчитывается по первоначальным оценкам.
 
-    The default is_info=True gives an informational gray report. In ordinary
-    mode the worst primary color applies. Explicit alpha and kappa thresholds
-    override the corresponding generic threshold. Spearman options apply to
-    valtest_annotation_quality_agent_legacy.
+    По умолчанию is_info=True даёт серый светофор. В обычном режиме итоговый
+    цвет определяется по худшей основной проверке. Явно заданные пороги
+    для альфы и капп имеют приоритет над общим порогом. Параметры корреляции
+    Спирмена применяются в valtest_annotation_quality_agent_legacy.
     """
     if sampler is None and criteria_stats is not None and methodology_version is None:
         return valtest_annotation_quality_agent_legacy(
@@ -204,10 +206,10 @@ def valtest_annotation_quality_agent_legacy(sampler: tp.Optional[tp.Union[Sample
                                      **kwargs) -> tp.Dict[str, tp.Dict[str, tp.Any]]:
     '''
     Оценка качества разметки на основании согласованности асессоров
-    Parameters:
+    Параметры:
         sampler: Объект класса Sampler или словарь с данными
         data_type: Тип данных, на которых производится расчет метрики.
-            Hint: название атрибута в sampler'е
+            Указывается имя атрибута семплера.
         min_periods: Минимальное количество не np.nan элементов
             для подсчета корреляции Спирмена между асессорами
         metric_columns: Список названий колонок с метриками.
@@ -219,7 +221,7 @@ def valtest_annotation_quality_agent_legacy(sampler: tp.Optional[tp.Union[Sample
         exec_env: Среда исполнения ('default' или 'sberds')
         is_info: True, если тест информативный
         criteria_stats: Предподсчитанный список статистик по критериям
-    Return:
+    Результат:
         Словарь в соответствии с концепцией llm_val
     '''
     if criteria_stats is None:
@@ -247,14 +249,14 @@ def compute_agreement_stats(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
                             exec_env: str) -> tp.List[tp.Dict[str, tp.Any]]:
     '''
     Вычисление статистик согласованности асессоров по каждому критерию
-    Parameters:
+    Параметры:
         sampler: Объект класса Sampler или словарь с данными
         data_type: Тип данных, на которых производится расчет метрики.
-            Hint: название атрибута в sampler'е
+            Указывается имя атрибута семплера.
         min_periods: Минимальное количество наблюдений для корреляции Спирмена
         metric_columns: Список колонок с метриками
         exec_env: Среда исполнения
-    Return:
+    Результат:
         Список словарей по критериям с ключами 'criterion', 'check' и 'value'
     '''
     x_data = (pd.DataFrame.from_dict(sampler[data_type]['X'])
@@ -282,12 +284,12 @@ def compute_criterion_value(df: pd.DataFrame,
                             min_periods: int) -> float:
     '''
     Расчет значения согласия по одному критерию выбранной проверкой
-    Parameters:
+    Параметры:
         df: DataFrame с колонками assessor_id, session_id и метриками
         metric_column: Название колонки с метрикой критерия
         check: Наименование выбранной проверки
         min_periods: Минимальное количество наблюдений для корреляции Спирмена
-    Return:
+    Результат:
         Значение согласия по критерию
     '''
     check_to_func = {
@@ -302,9 +304,9 @@ def compute_criterion_value(df: pd.DataFrame,
 def classify_annotation_type(markup_column: pd.Series) -> str:
     '''
     Классификация типа разметки
-    Parameters:
+    Параметры:
         markup_column: Series с данными разметки по одной из колонок
-    Return:
+    Результат:
         Тип разметки: 'nominal', 'ordinal' или 'binary'
     '''
     clean_column = markup_column.dropna()
@@ -321,11 +323,11 @@ def select_agreement_check(df: pd.DataFrame,
                            n_assessors: int) -> str:
     '''
     Выбор проверки согласия по типу разметки и перекрытию для критерия
-    Parameters:
+    Параметры:
         df: DataFrame с колонками assessor_id, session_id и метриками
         metric_column: Название колонки с метрикой критерия
         n_assessors: Количество уникальных асессоров
-    Return:
+    Результат:
         Наименование проверки для критерия
     '''
     column_type = classify_annotation_type(df[metric_column])
@@ -344,10 +346,10 @@ def encode_nominal_labels(df: pd.DataFrame,
                           metric_column: str) -> pd.DataFrame:
     '''
     Кодирование произвольных меток критерия в числовые коды
-    Parameters:
+    Параметры:
         df: DataFrame с колонками assessor_id, session_id и метриками
         metric_column: Название колонки с метрикой критерия
-    Return:
+    Результат:
         DataFrame с числовыми кодами меток вместо исходных значений
     '''
     encoded = df[['assessor_id', 'session_id', metric_column]].copy()
@@ -363,10 +365,10 @@ def krippendorff_alpha(df: pd.DataFrame,
                        metric_column: str) -> float:
     '''
     Вычисление альфы Криппендорфа для неупорядоченного критерия
-    Parameters:
+    Параметры:
         df: DataFrame с колонками assessor_id, session_id и метриками
         metric_column: Название колонки с неупорядоченной метрикой критерия
-    Return:
+    Результат:
         Коэффициент альфа Криппендорфа
     '''
     encoded = encode_nominal_labels(df, metric_column)
@@ -390,12 +392,12 @@ def spearman_pair_correlation(df: pd.DataFrame,
                               min_periods: int=1) -> float:
     '''
     Вычисление попарного коэффициента корреляции Спирмена
-    Parameters:
+    Параметры:
         df: DataFrame с колонками assessor_id, session_id и метриками
         metric_column: Название колонки с упорядоченной метрикой критерия
         min_periods: Минимальное количество не np.nan элементов
             для подсчета корреляции Спирмена между асессорами
-    Return:
+    Результат:
         Коэффициент Спирмена
     '''
     test_data = pd.pivot_table(df,
@@ -416,10 +418,10 @@ def cohen_kappa_pair(df: pd.DataFrame,
                      metric_column: str) -> float:
     '''
     Вычисление Каппы Коэна для бинарного критерия
-    Parameters:
+    Параметры:
         df: DataFrame с колонками assessor_id, session_id и метриками
         metric_column: Название колонки с бинарной метрикой критерия
-    Return:
+    Результат:
         Значение Каппы Коэна
     '''
     encoded = encode_nominal_labels(df, metric_column)
@@ -445,10 +447,10 @@ def fleiss_kappa_calc(df: pd.DataFrame,
                       metric_column: str) -> float:
     '''
     Вычисление Каппы Флейса для бинарного критерия
-    Parameters:
+    Параметры:
         df: DataFrame с колонками assessor_id, session_id и метриками
         metric_column: Название колонки с бинарной метрикой критерия
-    Return:
+    Результат:
         Значение Каппы Флейса
     '''
     encoded = encode_nominal_labels(df, metric_column)

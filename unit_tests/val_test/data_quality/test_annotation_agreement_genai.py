@@ -5,7 +5,7 @@ from types import ModuleType, SimpleNamespace
 import pandas as pd
 import pytest
 
-from llm_val.val_test.data_quality.annotation_agreement_v4 import (
+from llm_val.val_test.data_quality.annotation_agreement import (
     ALPHA,
     CLASS_AGREEMENT,
     COHEN,
@@ -52,7 +52,7 @@ def _rows(result, check=None):
     ],
 )
 def test_nominal_selection_and_exact_values(ratings, final, assessors, expected_method, expected):
-    """Calculate a single coefficient using the true overlap structure."""
+    """Проверяет выбор и значение коэффициента по фактическому перекрытию асессоров."""
     result = _run(_tables(ratings, final, users=assessors))
     (row,) = [row for row in _rows(result) if row['primary']]
     assert row['check'] == expected_method
@@ -61,7 +61,7 @@ def test_nominal_selection_and_exact_values(ratings, final, assessors, expected_
 
 
 def test_ordinal_cohen_uses_declared_order_and_weights():
-    """Compare weighted discordances with their chance expectation by hand."""
+    """Сверяет взвешенные расхождения и их случайное ожидание с ручным расчётом."""
     ratings = [['low', 'low'], ['medium', 'high'], ['high', 'high'], ['low', 'high']]
     options = {COLUMN: {'scale': 'ordinal', 'categories': ['low', 'medium', 'high'], 'weights': 'quadratic'}}
     (row,) = _rows(_run(_tables(ratings), criteria_specs=options))
@@ -73,7 +73,7 @@ def test_ordinal_cohen_uses_declared_order_and_weights():
 
 @pytest.mark.parametrize('as_text', [False, True])
 def test_numeric_ratings_default_to_ordinal(as_text):
-    """Weight the disagreement on a numeric scale unless a nominal scale is declared."""
+    """Проверяет порядковую шкалу для числовых меток и явное указание номинальной шкалы."""
     tables = _tables([[0, 0], [1, 2], [2, 2], [0, 2]], [0, 1, 2, 2])
     if as_text:
         tables['X'][COLUMN] = tables['X'][COLUMN].astype(str)
@@ -86,7 +86,7 @@ def test_numeric_ratings_default_to_ordinal(as_text):
 
 @pytest.mark.parametrize(('scale', 'expected'), [('ordinal', 2 / 7), ('interval', 4 / 29)])
 def test_non_nominal_krippendorff(scale, expected):
-    """Verify ordinal and interval distances on the same incomplete ratings."""
+    """Сверяет расстояния для порядковой и интервальной шкал при неполном перекрытии."""
     ratings = [[0, 0], [1, 4, 4], [0, 4]]
     result = _run(_tables(ratings), criteria_specs={COLUMN: {'scale': scale}})
     (row,) = _rows(result)
@@ -95,7 +95,7 @@ def test_non_nominal_krippendorff(scale, expected):
 
 
 def test_interval_alpha_is_invariant_to_a_large_common_shift():
-    """Keep the original distances after subtracting a common integer offset."""
+    """Проверяет устойчивость интервальной альфы к большому общему сдвигу."""
     offset = 10**16
     tables = _tables([[offset, offset], [offset, offset], [offset + 2, offset + 4]])
     (row,) = _rows(_run(tables, criteria_specs={COLUMN: {'scale': 'interval'}}))
@@ -118,12 +118,12 @@ def test_interval_alpha_is_invariant_to_a_large_common_shift():
     ],
 )
 def test_target_rate_boundaries(count, expected):
-    """Respect every inclusive boundary in the increment."""
+    """Проверяет принадлежность граничных долей классов к диапазонам дисбаланса."""
     assert _rate_band(count, 200) == expected
 
 
 def test_imbalanced_ac1_and_rare_class_drive_ordinary_mode():
-    """Compute AC1 from per-object marginal frequencies and keep class effects separate."""
+    """Проверяет Gwet AC1 и согласованность редкого класса в обычном режиме."""
     sampler = _tables([[0, 0]] * 23 + [[1, 1], [0, 1]], [0] * 24 + [1])
     result = _run(sampler, is_info=False)
     (ac1,) = _rows(result, GWET)
@@ -140,7 +140,7 @@ def test_imbalanced_ac1_and_rare_class_drive_ordinary_mode():
 
 
 def test_imbalanced_ac1_does_not_weight_objects_by_number_of_ratings():
-    """Use the mean distribution per object under incomplete overlap."""
+    """Проверяет усреднение долей по объектам при неполном перекрытии."""
     result = _run(_tables([[0, 0]] * 24 + [[0, 1, 1]], [0] * 24 + [1]))
     (row,) = _rows(result, GWET)
     marginal = (2 / 3) / 25
@@ -151,7 +151,7 @@ def test_imbalanced_ac1_does_not_weight_objects_by_number_of_ratings():
 
 @pytest.mark.parametrize('as_json', [False, True])
 def test_final_labels_are_carried_through_sberds_mapping(as_json):
-    """Align the supplied final labels with numeric session IDs after serialization."""
+    """Проверяет сопоставление финальных меток с числовыми ID сессий после сериализации."""
     tables = _tables([[0, 0]] * 24 + [[0, 1]], [0] * 24 + [1])
     tables['X']['session_id'] += 17
     tables['y'].index += 17
@@ -165,7 +165,7 @@ def test_final_labels_are_carried_through_sberds_mapping(as_json):
 
 
 def test_final_label_type_is_aligned_without_creating_extra_categories():
-    """Keep FastTrack-style integer finals on the original string scale."""
+    """Сопоставляет целочисленные результаты FastTrack с исходными строковыми категориями."""
     tables = _tables([['0', '0']] * 24 + [['0', '1']], [0] * 24 + [1])
     rates = _rows(_run(tables), 'Target rate')
     assert {row['label']: row['target_rate'] for row in rates} == {'0': 0.96, '1': 0.04}
@@ -180,7 +180,7 @@ def test_final_label_type_is_aligned_without_creating_extra_categories():
     ],
 )
 def test_class_agreement_examples(original_votes, final, initial_count, expected):
-    """Retain the two coefficients from the increment in the imbalanced branch."""
+    """Проверяет расчёт согласованности в обоих примерах для несбалансированных классов."""
     # Padding preserves class-0 agreement and pushes the two examples into the imbalance branch.
     padding = 47 if initial_count == 2 else 71
     votes = original_votes + [[1, 1, 1] if initial_count is None else [1, 1]] * padding
@@ -190,7 +190,7 @@ def test_class_agreement_examples(original_votes, final, initial_count, expected
 
 
 def test_extreme_excludes_both_tails_and_retains_non_extreme_class():
-    """Calculate within-class agreement only for eligible classes."""
+    """Проверяет согласованность по классам, для которых применим расчёт."""
     final = [0] * 95 + [1] * 4 + [2] + [0] * 100
     result = _run(_tables([[label, label] for label in final], final), criteria_specs={COLUMN: {'scale': 'nominal'}})
     rows = {row['label']: row for row in _rows(result, CLASS_AGREEMENT)}
@@ -204,7 +204,7 @@ def test_extreme_excludes_both_tails_and_retains_non_extreme_class():
 
 
 def test_absent_class_is_undefined():
-    """Differentiate an absent class from a class with zero agreement."""
+    """Различает отсутствие класса и нулевую согласованность по классу."""
     result = _run(_tables([[0, 0], [0, 1]], [0, 0]), criteria_specs={COLUMN: {'categories': [0, 1]}})
     rows = {row['label']: row for row in _rows(result, CLASS_AGREEMENT)}
     assert rows['1']['value'] is None
@@ -214,7 +214,7 @@ def test_absent_class_is_undefined():
 
 
 def test_novel_adjudication_changes_main_overlap():
-    """Ignore repeated adjudication labels and count novel ones jointly."""
+    """Проверяет переход к неполному перекрытию после появления новой метки арбитра."""
     ratings = [[0, 1, 0], [0, 0], [1, 1], [1, 1]]
     paired = _run(_tables(ratings, [0, 0, 1, 1], initial_count=2))
     assert _rows(paired, COHEN)[0]['n_assessors'] == 2
@@ -228,7 +228,7 @@ def test_novel_adjudication_changes_main_overlap():
 
 
 def test_novel_adjudicator_contributes_all_their_votes():
-    """Use the same adjudicator's repeated and novel labels in the main statistic."""
+    """Проверяет учёт повторных и новых меток одного арбитра в основном коэффициенте."""
     ratings = [[0, 1, 2], [0, 1, 0], [0, 0], [0, 0], [1, 1], [1, 1]]
     tables = _tables(ratings, [0, 0, 0, 0, 1, 1], initial_count=2)
     (row,) = _rows(_run(tables, criteria_specs={COLUMN: {'scale': 'nominal'}}), ALPHA)
@@ -236,7 +236,7 @@ def test_novel_adjudicator_contributes_all_their_votes():
 
 
 def test_novel_adjudication_never_enters_class_agreement():
-    """Compute class-level agreement using the initial pair only."""
+    """Проверяет расчёт согласованности по классу на первоначальной паре оценок."""
     tables = _tables([[0, 0]] * 24 + [[1, 1, 2]], [0] * 24 + [1], initial_count=2)
     result = _run(tables, criteria_specs={COLUMN: {'scale': 'nominal'}})
     (rare,) = [row for row in _rows(result, CLASS_AGREEMENT) if row['label'] == '1']
@@ -245,7 +245,7 @@ def test_novel_adjudication_never_enters_class_agreement():
 
 
 def test_dynamic_order_and_unavailable_metadata():
-    """Respect an explicit rating order and expose missing dynamic metadata."""
+    """Проверяет заданный порядок оценок и сообщение об отсутствии данных о порядке."""
     tables = _tables([[0, 1, 0], [0, 0], [1, 1]], [0, 0, 1])
     unmarked = _run(tables, dynamic_overlap=True, is_info=False)
     assert unmarked['report']['semaphore'] == 'gray'
@@ -258,7 +258,7 @@ def test_dynamic_order_and_unavailable_metadata():
 
 
 def test_dynamic_flags_can_mark_more_than_two_independent_ratings():
-    """Respect each explicit primary decision, even with three initial raters."""
+    """Проверяет учёт трёх явно отмеченных первоначальных оценок."""
     ratings = [[0, 0, 1, 1], [1, 1, 0], [1, 1, 1], [0, 0, 0]]
     result = _run(_tables(ratings, [0, 1, 1, 0], initial_count=3))
     (row,) = _rows(result, FLEISS)
@@ -267,7 +267,7 @@ def test_dynamic_flags_can_mark_more_than_two_independent_ratings():
 
 
 def test_ordered_adjudicator_cannot_replace_a_missing_initial_rating():
-    """Do not promote rating number three when the second score is missing."""
+    """Проверяет обработку пропуска второй оценки при наличии оценки арбитра."""
     tables = _tables([[0, None, 1], [0, 0], [1, 1]], [0, 0, 1])
     tables['X']['rating_order'] = tables['X']['assessor_id']
     result = _run(tables, is_info=False)
@@ -283,14 +283,14 @@ def test_ordered_adjudicator_cannot_replace_a_missing_initial_rating():
     ],
 )
 def test_invalid_ratings_report_reason(ratings, users, message):
-    """Provide a gray row when overlap or assessor identity cannot be established."""
+    """Проверяет серый светофор и причину при недостаточном перекрытии или неоднозначных оценках."""
     result = _run(_tables(ratings, [0, 1], users=users), is_info=False)
     assert result['report']['semaphore'] == 'gray'
     assert message in _rows(result)[0]['comment']
 
 
 def test_multilabel_per_label_and_jaccard():
-    """Distinguish valid empty sets from missing labels."""
+    """Различает валидный пустой набор меток и пропущенное значение."""
     ratings = [[[], []], [['x'], ['x', 'y']], [['y'], ['y']]]
     tables = _tables(ratings, [[], ['x'], ['y']])
     by_label = _run(tables, criteria_specs={COLUMN: {'scale': 'multilabel'}})
@@ -302,7 +302,7 @@ def test_multilabel_per_label_and_jaccard():
 
 
 def test_jaccard_uses_ratings_and_checks_the_declared_categories():
-    """The set distance ignores final labels and honors the agreed domain."""
+    """Проверяет расчёт по оценкам асессоров и проверку допустимых категорий."""
     tables = _tables([[[], ['x']], [['x'], ['x']]], [['x'], ['x']])
     tables['y'].index = pd.Index([0, 0], name='session_id')
     options = {'scale': 'multilabel', 'multilabel_method': 'jaccard', 'categories': ['x']}
@@ -313,7 +313,7 @@ def test_jaccard_uses_ratings_and_checks_the_declared_categories():
 
 
 def test_multilabel_adjudicator_novelty_is_rechecked_for_each_label():
-    """A new label set can repeat a vote for x while introducing one for y."""
+    """Проверяет новизну оценки арбитра отдельно для каждой метки."""
     ratings = [[['x'], [], ['x', 'y']], [['x'], ['x'], ['x']], [['y'], ['y']], [[], []]]
     result = _run(_tables(ratings, [['x'], ['x'], ['y'], []], initial_count=2))
     main = {row['label']: row for row in _rows(result) if row['primary']}
@@ -326,7 +326,7 @@ def test_multilabel_adjudicator_novelty_is_rechecked_for_each_label():
 
 @pytest.fixture
 def dawid_skene_inputs(monkeypatch):
-    """Record votes and return a deterministic decision for each task."""
+    """Записывает переданные оценки и возвращает детерминированную метку для каждого объекта."""
     crowdkit = ModuleType('crowdkit')
     module = ModuleType('crowdkit.aggregation')
     inputs = []
@@ -347,7 +347,7 @@ def dawid_skene_inputs(monkeypatch):
 
 
 def test_dawid_skene_receives_all_ratings_when_final_is_missing(dawid_skene_inputs):
-    """Arbitration affects final labels while agreement uses the initial ratings."""
+    """Проверяет передачу всех оценок в агрегацию и первоначальных оценок в расчёт согласия."""
     votes = [['no', 'yes', 'no'], ['yes', 'no', 'yes'], ['yes', 'yes'], ['no', 'no']]
     result = _run(_tables(votes, initial_count=2))
     (ratings,) = dawid_skene_inputs
@@ -371,7 +371,7 @@ def test_dawid_skene_receives_all_ratings_when_final_is_missing(dawid_skene_inpu
     ],
 )
 def test_fasttrack_sampler_preserves_rating_categories(dawid_skene_inputs, first, second, expected):
-    """Decode the aggregated class without coercing the original scale to integers."""
+    """Проверяет сохранение исходных категорий после агрегации."""
     from llm_val.sampler.FastTrackSampler import FastTrackSampler
 
     wide = pd.DataFrame(
@@ -390,7 +390,7 @@ def test_fasttrack_sampler_preserves_rating_categories(dawid_skene_inputs, first
 
 
 def test_fasttrack_sampler_keeps_final_labels_for_all_criteria(dawid_skene_inputs):
-    """Use the second criterion's full label set when the first lacks an object."""
+    """Проверяет полноту финальных меток второго критерия при пропуске в первом."""
     from llm_val.sampler.FastTrackSampler import FastTrackSampler
     from llm_val.scorer.UniversalScorer import UniversalScorer
     from llm_val.utils.metrics import METRICS
@@ -420,7 +420,7 @@ def test_fasttrack_sampler_keeps_final_labels_for_all_criteria(dawid_skene_input
 
 
 def test_multilabel_final_label_sources_use_same_aggregation(dawid_skene_inputs):
-    """The fallback aggregates the same sets as the stock sampler."""
+    """Сверяет агрегацию наборов меток в семплере и в тесте."""
     from llm_val.sampler.FastTrackSampler import FastTrackSampler
 
     votes = [['x'], ['y'], ['x', 'y']]
@@ -456,7 +456,7 @@ def test_multilabel_final_label_sources_use_same_aggregation(dawid_skene_inputs)
     ],
 )
 def test_color_boundaries(check, value, color):
-    """Use a red inclusive lower bound and a strict green bound."""
+    """Проверяет включённую нижнюю границу красного и строгий порог зелёного."""
     assert _color(value, check, THRESHOLDS) == color
 
 
@@ -468,14 +468,14 @@ def test_color_boundaries(check, value, color):
     ],
 )
 def test_exact_color_boundaries_after_fleiss_arithmetic(votes, final, value, color):
-    """Rounding in a computed coefficient cannot move an exact boundary."""
+    """Проверяет цвет на границах с учётом округления каппы Флейса."""
     result = _run(_tables(votes, final), is_info=False)
     assert _rows(result, FLEISS)[0]['value'] == pytest.approx(value)
     assert result['report']['semaphore'] == color
 
 
 def test_explicit_legacy_kappa_threshold_is_applied_in_rated_mode():
-    """Handle a method-specific threshold without changing the informational default."""
+    """Проверяет отдельный порог каппы и серый светофор по умолчанию."""
     tables = _tables([[0, 0], [1, 1], [1, 0], [0, 0]], [0, 1, 1, 0])
     options = {'semaphore_threshold_cohen': (0.1, 0.45)}
     assert _run(tables, **options)['report']['semaphore'] == 'gray'
@@ -483,7 +483,7 @@ def test_explicit_legacy_kappa_threshold_is_applied_in_rated_mode():
 
 
 def test_saved_agreement_can_be_reused_with_sampler():
-    """Render cached statistics through the standard validation call signature."""
+    """Проверяет повторное оформление отчёта по сохранённым статистикам."""
     tables = _tables([[0, 0], [1, 1], [1, 0], [0, 0]], [0, 1, 1, 0])
     cache = _run(tables)['precomputed']
     sampler = SimpleNamespace()
@@ -496,7 +496,7 @@ def test_saved_agreement_can_be_reused_with_sampler():
 
 
 def test_legacy_saved_agreement_can_be_rendered_without_sampler():
-    """Accept the previous release's saved row format in informational mode."""
+    """Проверяет оформление сохранённых строк прежнего формата в информативном режиме."""
     rows = [{'criterion': COLUMN, 'check': COHEN, 'value': 0.5}]
     result = valtest_annotation_quality_agent(None, criteria_stats=rows)
     assert result['precomputed']['criteria_stats'] == rows

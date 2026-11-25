@@ -8,16 +8,16 @@ from llm_val.utils.annotation_aggregation import aggregate_dawid_skene
 class FastTrackSampler(Sampler):
     '''
     Семплер для данных FastTrack.
-    Преобразует wide-формат (assessor_1..N в колонках) в long-формат
+    Преобразует широкий формат с отдельными колонками асессоров в длинный
     и агрегирует метки асессоров с помощью алгоритма Дэвида-Скина.
     '''
     def __init__(self,
                  test: pd.DataFrame,
                  n_iter: int=100):
         '''
-        Parameters:
-            test: Тестовый набор данных в wide-формате
-            n_iter: Количество итераций Dawid-Skene
+        Параметры:
+            test: Тестовый набор данных в широком формате
+            n_iter: Число итераций алгоритма Дэвида–Скина
         '''
         self._n_iter = n_iter
         test = self._preproc(test, n_iter)
@@ -27,12 +27,12 @@ class FastTrackSampler(Sampler):
                  df: pd.DataFrame,
                  n_iter: int) -> tp.Dict[str, pd.DataFrame]:
         '''
-        Преобразование данных из wide-формата в long-формат
-        и агрегация меток асессоров с помощью Dawid-Skene
-        Parameters:
-            df: Исходный DataFrame в wide-формате
-            n_iter: Количество итераций Dawid-Skene
-        Return:
+        Преобразование данных из широкого формата в длинный
+        и агрегация меток асессоров методом Дэвида–Скина
+        Параметры:
+            df: Исходный DataFrame в широком формате
+            n_iter: Число итераций алгоритма Дэвида–Скина
+        Результат:
             Словарь с ключами X и y
         '''
         df = df.copy()
@@ -50,7 +50,7 @@ class FastTrackSampler(Sampler):
 
     @property
     def final_labels(self) -> pd.DataFrame:
-        """Include final labels for sessions outside the scoring basket."""
+        """Возвращает финальные метки, включая сессии вне корзины для расчёта качества."""
         x_data, y_data = self.test['X'], self.test['y']
         metrics = [column for column in y_data if column in x_data and column.endswith('_metric')]
         omitted = x_data.loc[~x_data['session_id'].isin(y_data.index), metrics]
@@ -67,9 +67,9 @@ class FastTrackSampler(Sampler):
                        df: pd.DataFrame) -> tp.Tuple[tp.Dict, tp.List[str]]:
         '''
         Разделение колонок на группы асессоров и прочие колонки
-        Parameters:
+        Параметры:
             df: Исходный DataFrame
-        Return:
+        Результат:
             Кортеж из словаря групп асессоров и списка прочих колонок
         '''
         assessors = {}
@@ -88,13 +88,13 @@ class FastTrackSampler(Sampler):
                       assessor_groups: tp.Dict[str, tp.List[str]],
                       other_columns: tp.List[str]) -> pd.DataFrame:
         '''
-        Преобразование wide-формата в long-формат
-        Parameters:
+        Преобразование широкого формата в длинный
+        Параметры:
             df: Исходный DataFrame
             assessor_groups: Словарь с группами колонок по асессорам
             other_columns: Список прочих колонок
-        Return:
-            DataFrame в long-формате с колонкой assessor_id
+        Результат:
+            DataFrame в длинном формате с колонкой assessor_id
         '''
         agg_data = []
         for assessor_key in assessor_groups:
@@ -112,12 +112,12 @@ class FastTrackSampler(Sampler):
                                metric_columns: tp.List[str],
                                n_iter: int) -> tp.Dict[str, pd.Series]:
         '''
-        Агрегация меток асессоров с помощью Dawid-Skene
-        Parameters:
-            x_data: DataFrame в long-формате
+        Агрегация меток асессоров методом Дэвида–Скина
+        Параметры:
+            x_data: DataFrame в длинном формате
             metric_columns: Список колонок с метриками
-            n_iter: Количество итераций Dawid-Skene
-        Return:
+            n_iter: Число итераций алгоритма Дэвида–Скина
+        Результат:
             Агрегированные по session_id метки каждого критерия
         '''
         final_labels = {}

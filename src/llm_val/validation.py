@@ -32,7 +32,7 @@ class Validation():
                  precomputed: tp.Optional[tp.Union[os.PathLike, tp.Dict]]=None):
         '''
         Конструктор
-        Parameters:
+        Параметры:
             sampler: Объект класса Sampler
             scorer: Объект класса Scorer
             param_config: Словарь с конфигурацией каждого теста.
@@ -62,11 +62,11 @@ class Validation():
                  save_word: bool=False) -> tp.Tuple[tp.Dict, tp.Dict]:
         '''
         Метод для проведения валидации
-        Parameters:
+        Параметры:
             save_res_pkl: Если True, то сохраняет результаты тестов в .pkl
             save_excel: Если True, то сохраняет результаты тестов в .xlsx
-            save_word: Если True, то сохраняет результаты тестов в .doc (TODO)
-        Return:
+            save_word: Если True, то сохраняет результаты тестов в .doc (планируется)
+        Результат:
             Кортеж со словарем с результатами тестов и со словарем с агрегацией по блокам
         '''
         tests_result = {}
@@ -119,11 +119,11 @@ class Validation():
                   prec_params: tp.Dict[str, tp.Any]) -> tp.Tuple[tp.Dict, tp.Dict]:
         '''
         Метод для запуска теста
-        Parameters:
+        Параметры:
             func_test: tp.Callable объект функции теста
             test_params: Параметры теста
             prec_params: Предподсчитанные значения теста
-        Return:
+        Результат:
             Кортеж с результатом теста и precomputed
         '''
         func_signature = inspect.signature(func_test)
@@ -145,7 +145,7 @@ class Validation():
                           filename: str):
         '''
         Метод для сохранения пиклов
-        Parameters:
+        Параметры:
             data: Данные, которые необходимо сохранить
             local_dir: Локальная директория, куда сохраняется пикл
             global_dir: Глобальная директория, куда сохраняется пикл
@@ -161,9 +161,9 @@ class Validation():
                           param_config: tp.Dict[str, tp.Any]) -> tp.Dict[str, tp.Any]:
         '''
         Метод для верификации параметров тестов
-        Parameters:
+        Параметры:
             param_config: Параметры тестов
-        Return:
+        Результат:
             Словарь с параметрами тестов, которые будут проведены
         '''
         wrong_test = []
@@ -184,9 +184,9 @@ class Validation():
                                      test_name: str) -> tp.Callable:
         '''
         Метод получения tp.Callable объекта по названию теста
-        Parameters:
+        Параметры:
             test_name: Название теста
-        Return:
+        Результат:
             tp.Callable объект функции теста
         '''
         path = self.desc_config.get(test_name)['target']
@@ -198,9 +198,9 @@ class Validation():
                       func_path: str) -> tp.Callable:
         '''
         Метод получения tp.Callable объекта по пути
-        Parameters:
+        Параметры:
             func_path: Путь до теста
-        Return:
+        Результат:
             tp.Callable объект
         '''
         return getattr(import_module(".".join(func_path.split(".")[:-1])), func_path.split(".")[-1])
@@ -210,9 +210,9 @@ class Validation():
                           save_dir: os.PathLike) -> os.PathLike:
         '''
         Метод создания директории с результатами тестов
-        Parameters:
+        Параметры:
             save_dir: Путь до директории для сохранения результатов
-        Return:
+        Результат:
             Путь до директории
         '''
         store_dir = os.path.join(save_dir,
@@ -225,9 +225,9 @@ class Validation():
                                err_msg: str) -> tp.Dict[str, tp.Any]:
         '''
         Метод создания словаря теста с ошибкой
-        Parameters:
+        Параметры:
             err_msg: Сообщение ошибки
-        Return:
+        Результат:
             Словарь с ошибкой
         '''
         return {'semaphore': 'gray',
@@ -239,9 +239,9 @@ class Validation():
                        semaphore_blocks: tp.Dict[str, tp.List[str]]) -> tp.Dict[str, tp.Any]:
         '''
         Метод агрегации светофоров в разрезе блоков
-        Parameters:
+        Параметры:
             semaphore_blocks: Словарь со списками цветов светофоров
-        Return:
+        Результат:
             Словарь с информацией о агрегации тестов в разрезе блоков
         '''
         block_color = {}
@@ -267,9 +267,9 @@ class Validation():
                     is_semaphore_desc_info: bool=False):
         '''
         Метод агрегации светофоров в разрезе блоков
-        Parameters:
+        Параметры:
             data: Словарь с результатами проведения тестов. 
-                Ключ - название теста, значение - report по тестам
+                Ключ - название теста, значение — отчёт по тесту
             agg_table: Словарь с агрегированными светофорами по блокам
                 Ключ - название блока, значение - информация о агрегации
             desc_config: Словрь с описанием тестов.

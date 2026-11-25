@@ -27,12 +27,12 @@ SCALES = {'nominal', 'ordinal', 'interval', 'multilabel'}
 
 
 class UnavailableAgreement(ValueError):
-    """Required data are absent or insufficient for a criterion."""
+    """Для расчёта согласованности по критерию недостаточно данных."""
 
 
 @dataclass(frozen=True)
 class Criterion:
-    """Measurement scale and calculation options agreed for a criterion."""
+    """Шкала измерения и согласованные параметры расчёта для критерия."""
 
     scale: str
     categories: tuple
@@ -43,7 +43,7 @@ class Criterion:
 
 @dataclass(frozen=True)
 class Ratings:
-    """Matrices for initial agreement, the main coefficient and final labels."""
+    """Матрицы первоначальных оценок, основного расчёта и агрегации финальных меток."""
 
     initial: pd.DataFrame
     main: pd.DataFrame
@@ -550,7 +550,7 @@ def _color(value, method, thresholds):
 
 
 def report_agreement(rows, *, is_info, thresholds, cache_version=CACHE_VERSION):
-    """Build the library result and summarize the worst primary color."""
+    """Формирует отчёт и определяет итоговый цвет по худшей основной проверке."""
     colored_rows = [(row, 'gray' if is_info else _color(row['value'], row['check'], thresholds)) for row in rows]
     primary = [color for row, color in colored_rows if row['primary']]
     table = pd.DataFrame(
@@ -585,7 +585,7 @@ def report_agreement(rows, *, is_info, thresholds, cache_version=CACHE_VERSION):
 
 
 def run_agreement(data, final, columns, specs, *, dynamic, flag, order, is_info, thresholds):
-    """Calculate GenAI v4 agreement on a native Sampler's rating tables."""
+    """Рассчитывает согласованность асессоров по таблицам оценок семплера."""
     columns = (
         list(dict.fromkeys([*[c for c in data.columns if str(c).endswith('_metric')], *specs]))
         if columns is None

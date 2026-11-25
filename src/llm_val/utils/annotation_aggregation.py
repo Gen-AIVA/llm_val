@@ -8,7 +8,7 @@ SET_LABEL_TYPES = (list, tuple, set, frozenset, np.ndarray)
 
 
 def as_label_set(value):
-    """Represent an unordered set of labels as a hashable category."""
+    """Представляет неупорядоченный набор меток как хешируемую категорию."""
     if not isinstance(value, SET_LABEL_TYPES):
         raise ValueError('Многометочная оценка должна быть списком или множеством меток.')
     if any(pd.api.types.is_scalar(label) and pd.isna(label) for label in value):
@@ -17,7 +17,7 @@ def as_label_set(value):
 
 
 def canonical_integer_labels(labels: pd.Series) -> Optional[pd.Series]:
-    """Decode integer strings that retain their identity under a round trip."""
+    """Преобразует целочисленные строки, которые восстанавливаются без изменений."""
     if pd.api.types.infer_dtype(labels) != 'string':
         return None
     integers = pd.to_numeric(labels, errors='coerce')
@@ -32,7 +32,7 @@ def aggregate_dawid_skene(
     *,
     numeric_strings: bool = False,
 ) -> pd.Series:
-    """Aggregate task/worker/label rows and decode the original label categories."""
+    """Агрегирует оценки по методу Дэвида–Скина и восстанавливает исходные категории."""
     rows = ratings.dropna(subset=['label']).sort_values(['task', 'worker'])
     labels = rows['label']
     if labels.empty:
