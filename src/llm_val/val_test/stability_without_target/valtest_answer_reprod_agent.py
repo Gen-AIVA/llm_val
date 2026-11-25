@@ -233,7 +233,12 @@ def get_sampler_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
     else:
         sampler_object = tp.cast(Sampler, sampler)
         data = getattr(sampler_object, data_type)['X']
-    return deepcopy(data)
+    data = deepcopy(data)
+    
+    if 'session_id' in data.columns:
+        data = data.drop_duplicates(subset=['session_id']).reset_index(drop=True)
+    
+    return data
 
 
 def find_columns_by_prefix(data: pd.DataFrame,
@@ -633,8 +638,12 @@ def get_augmented_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
                                               effective_augmentations,
                                               seed,
                                               p_augmented)
+    index = data['session_id'] if 'session_id' in data.columns else None
     result_df = pd.DataFrame({'aug_valtest_answer_reprod_agent_' + str(idx): list(augmented_queries)
-                              for idx in range(n_columns)})
+                              for idx in range(n_columns)},
+                              index=index)
+    if index is not None:
+        result_df.index.name = 'session_id'
     return result_df
 
 

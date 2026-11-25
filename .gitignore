@@ -5,8 +5,6 @@
 /examples/RussianNLP
 /examples/data/brainstorm
 /examples/data/rag_vectorstore
-.DS_Store
-/examples/.DS_Store
 
 # Python
 __pycache__/
