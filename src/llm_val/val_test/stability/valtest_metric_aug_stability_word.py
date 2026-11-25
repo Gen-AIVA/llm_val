@@ -72,7 +72,9 @@ def report_valtest_metric_aug_stability_word(baseline_per_aug: tp.Dict[str, tp.D
         elif not is_sig:
             semaphore_colors.append('green')
         else:
-            semaphore_colors.append(semaphore_by_threshold(diff, semaphore_threshold, greater_is_better=greater_is_better))
+            semaphore_colors.append(semaphore_by_threshold(diff, 
+                                                           semaphore_threshold, 
+                                                           greater_is_better = not greater_is_better))
 
     color = 'gray' if is_info else worst_semaphore(semaphore_colors)
 
@@ -172,14 +174,21 @@ def valtest_metric_aug_stability_word(sampler: tp.Union[Sampler, tp.Dict[str, tp
             semaphore_threshold=semaphore_threshold, greater_is_better=greater_is_better,
             is_info=is_info, stats_dict=stats_dict
         )
-        result = {'report': report, 'precomputed': {'baseline_per_aug': active_baseline_per_aug, 'metrics_augmented': metrics_augmented, 'p_values': p_values}}
+        result = {'report': report, 
+                  'precomputed': {'baseline_per_aug': active_baseline_per_aug, 
+                                  'metrics_augmented': metrics_augmented, 
+                                  'p_values': p_values}}
     else:
-        augmented_data = get_augmented_data(
+        data = get_sampler_data(sampler, data_type, exec_env)
+        aug_df = get_augmented_data(
             sampler=sampler, data_type=data_type, augmentations_list=augmentations_list,
             seed=seed, aug_client=aug_client, aug_model_name=aug_model_name,
             translation_language=translation_language, word_replace_ratio=word_replace_ratio,
             max_attempts=max_attempts, exec_env=exec_env, aug_model_prompts=aug_model_prompts
         )
+        augmented_data = data.copy()
+        for col in aug_df.columns:
+            augmented_data[col] = aug_df[col].values
         total_size = len(augmented_data)
         checker = resolve_answer_checker(answer_checker)
         baseline_per_aug = {}
@@ -365,7 +374,12 @@ def get_sampler_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
     else:
         sampler_object = tp.cast(Sampler, sampler)
         data = getattr(sampler_object, data_type)['X']
-    return deepcopy(data)
+    data = deepcopy(data)
+    
+    if 'session_id' in data.columns:
+        data = data.drop_duplicates(subset=['session_id']).reset_index(drop=True)
+    
+    return data
 
 
 def get_augmented_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
@@ -398,41 +412,48 @@ def get_augmented_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
         Датафрейм с добавленными колонками, содержащими аугментированные тексты
     '''
     aug_col_prefix = 'aug_valtest_metric_aug_stability_word_'
-
     data = get_sampler_data(sampler, data_type, exec_env)
+    
+    index = data['session_id'] if 'session_id' in data.columns else data.index
+    aug_df = pd.DataFrame(index=index)
+    if 'session_id' in data.columns:
+        aug_df.index.name = 'session_id'
+        
     rng = np.random.default_rng(seed)
     paraphrase_prompt = aug_model_prompts.get('paraphrase') if aug_model_prompts else None
     synonym_prompt = aug_model_prompts.get('synonym') if aug_model_prompts else None
     translation_fwd_prompt = aug_model_prompts.get('translation_fwd') if aug_model_prompts else None
     translation_bwd_prompt = aug_model_prompts.get('translation_bwd') if aug_model_prompts else None
+    original_questions = data['input_query'].tolist()
+    
     for aug_name in augmentations_list:
         col_name = f'{aug_col_prefix}{aug_name}'
         if col_name in data.columns:
+            aug_df[col_name] = data[col_name].values
             continue
         if aug_client is None or aug_model_name is None:
             continue
-        original_questions = data['input_query'].tolist()
         if aug_name == 'paraphrase':
-            data[col_name] = batch_paraphrase_api(
+            aug_df[col_name] = batch_paraphrase_api(
                 batch=original_questions, aug_client=aug_client, aug_model_name=aug_model_name,
                 system_prompt=paraphrase_prompt, max_attempts=max_attempts
             )
         elif aug_name == 'synonym':
-            data[col_name] = batch_synonym_api(
+            aug_df[col_name] = batch_synonym_api(
                 batch=original_questions, aug_client=aug_client, aug_model_name=aug_model_name,
                 rng=rng, word_replace_ratio=word_replace_ratio, system_prompt=synonym_prompt,
                 max_attempts=max_attempts
             )
         elif aug_name == 'translation':
-            data[col_name] = batch_translation_api(
+            aug_df[col_name] = batch_translation_api(
                 batch=original_questions, aug_client=aug_client, aug_model_name=aug_model_name,
                 target_language=translation_language,
                 system_prompt_fwd=translation_fwd_prompt, system_prompt_bwd=translation_bwd_prompt,
                 max_attempts=max_attempts
             )
         else:
-            raise ValueError(f"Неизвестный тип аугментации: {aug_name}")
-    return data
+            raise ValueError(f'Неизвестный тип аугментации: {aug_name}')
+    return aug_df
 
 
 def prepare_and_evaluate(data: pd.DataFrame,

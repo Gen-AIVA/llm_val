@@ -31,7 +31,7 @@ def prepare_traces(data: pd.DataFrame,
     traces = traces.dropna(subset=['trace_id', 'span_name'])
     for column in ['start_time_ns', 'end_time_ns']:
         traces[column] = pd.to_datetime(traces[column], utc=True)
-    traces = traces.sort_values(['trace_id', 'start_time_ns', 'end_time_ns', 'span_name'])
+    traces = traces.sort_values(['start_time_ns', 'end_time_ns', 'trace_id', 'span_name'])
     traces = traces.reset_index(drop=True)
     traces['duration'] = (traces['end_time_ns'] - traces['start_time_ns']).dt.total_seconds()
     return traces
@@ -137,8 +137,6 @@ def calc_loop_statistic(traces: pd.DataFrame) -> pd.DataFrame:
     '''
     stages = traces['span_name']
     groups = traces.groupby('trace_id', observed=True)['span_name']
-    # Сохраняем исходные формулы, включая сдвиг на три события для «Пинг-Понга»
-    # и разметку неповторяющихся событий в показателе произвольной операции.
     ping_pong = stages.eq(groups.shift(-3)).groupby(traces['trace_id'], observed=True).shift(1, fill_value=False)
     duplicated = traces.duplicated(['trace_id', 'span_name'], keep=False)
     repeated_before_last = traces.duplicated(['trace_id', 'span_name'], keep='last')

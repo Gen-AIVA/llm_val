@@ -38,7 +38,7 @@ def report_valtest_metric_aug_stability_symbol(metric_baseline: tp.Dict[str, flo
     augmented_values = np.array([metrics_augmented[main_metric][name] for name in augmentations_list])
     absolute_difference = baseline_value - augmented_values
     relative_difference = absolute_difference / baseline_value * 100
-    semaphore_colors = [semaphore_by_threshold(difference, semaphore_threshold, greater_is_better=greater_is_better)
+    semaphore_colors = [semaphore_by_threshold(difference, semaphore_threshold, greater_is_better = not greater_is_better)
                         for difference in absolute_difference]
     color = 'gray' if is_info else worst_semaphore(semaphore_colors)
     results = pd.DataFrame({'Тип преобразования': augmentations_list,
@@ -176,7 +176,12 @@ def get_sampler_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
     else:
         sampler_object = tp.cast(Sampler, sampler)
         data = getattr(sampler_object, data_type)['X']
-    return deepcopy(data)
+    data = deepcopy(data)
+    
+    if 'session_id' in data.columns:
+        data = data.drop_duplicates(subset=['session_id']).reset_index(drop=True)
+    
+    return data
 
 
 def compute_baseline_metric(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
@@ -451,11 +456,16 @@ def get_augmented_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
     '''
     augmentations_list = augmentations_list or get_default_augmentations()
     data = get_sampler_data(sampler, data_type, exec_env)
-    aug_df = pd.DataFrame(index=data.index)
+    index = data['session_id'] if 'session_id' in data.columns else data.index
+    aug_df = pd.DataFrame(index=index)
+    if 'session_id' in data.columns:
+        aug_df.index.name = 'session_id'
     for aug_name in augmentations_list:
         rng = build_rng(seed)
-        aug_df['aug_valtest_metric_aug_stability_symbol_' + aug_name] = build_augmented_column(data, aug_name,
-                                                                                               rng, p_augmented)
+        aug_df['aug_valtest_metric_aug_stability_symbol_' + aug_name] = build_augmented_column(data, 
+                                                                                               aug_name,
+                                                                                               rng, 
+                                                                                               p_augmented)
     return aug_df
 
 

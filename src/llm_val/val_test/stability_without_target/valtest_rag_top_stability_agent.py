@@ -2,6 +2,7 @@ import random
 import numpy as np
 import pandas as pd
 import typing as tp
+from copy import deepcopy
 
 from llm_val.sampler.Sampler import Sampler
 from llm_val.ragexecutor.RAGExecutor import RAGExecutor
@@ -139,7 +140,7 @@ def valtest_rag_top_stability_agent(sampler: tp.Union[Sampler, tp.Dict[str, tp.A
         need_compute[aug_type] = (cfg['precomputed'] is None) and bool(cfg['aug_list'])
 
     if any(need_compute.values()):
-        data = sampler[data_type] if exec_env == 'sberds' else getattr(sampler, data_type)
+        data = get_sampler_data(sampler, data_type, exec_env)
         queries = data['X']['input_query'].values.tolist()
         original_tops_max = executor.get_topK_passages(questions=queries, topK=topK)
         original_tops = {
@@ -193,9 +194,12 @@ def valtest_rag_top_stability_agent(sampler: tp.Union[Sampler, tp.Dict[str, tp.A
         'iou_word_results': iou_word_results
     }
 
-    report = report_valtest_rag_top_stability_agent(iou_symbol_results, iou_word_results,
-                                                    topK, semaphore_threshold, is_info)
-    return {'report': report, 'precomputed': precomputed}
+    report = report_valtest_rag_top_stability_agent(iou_symbol_results, 
+                                                    iou_word_results,
+                                                    topK, semaphore_threshold, 
+                                                    is_info)
+    return {'report': report, 
+            'precomputed': precomputed}
 
 
 def get_augmented_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
@@ -232,9 +236,13 @@ def get_augmented_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
         DataFrame с аугментированными запросами в колонках aug_valtest_metric_aug_stability_agent_<aug>
     '''
     aug_col_prefix = 'aug_valtest_rag_top_stability_agent_'
-    data = sampler[data_type]['X'] if exec_env == 'sberds' else getattr(sampler, data_type)['X']
+    data = get_sampler_data(sampler, data_type, exec_env)
+    index = data['session_id'] if 'session_id' in data.columns else data.index
     augmentations_list_with_prefix = list(map(lambda aug: aug_col_prefix + aug, augmentations_list))
     aug_df = pd.DataFrame(index=data.index, columns=augmentations_list_with_prefix)
+    if 'session_id' in data.columns:
+        aug_df.index.name = 'session_id'
+
     rng = build_rng(seed)
     
     if type_augmentation == 'symbol':
@@ -254,14 +262,14 @@ def get_augmented_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
         synonym_prompt = aug_model_prompts.get('synonym') if aug_model_prompts else None
         translation_fwd_prompt = aug_model_prompts.get('translation_fwd') if aug_model_prompts else None
         translation_bwd_prompt = aug_model_prompts.get('translation_bwd') if aug_model_prompts else None
+        original_questions = data['input_query'].tolist()
         for aug_name in augmentations_list:
             col_name = f'{aug_col_prefix}{aug_name}'
             if col_name in data.columns:
-                aug_df[col_name] = data[col_name]
+                aug_df[col_name] = data[col_name].values
                 continue
             if aug_client is None or aug_model_name is None:
                 continue
-            original_questions = data['input_query'].tolist()
             if aug_name == 'paraphrase':
                 aug_df[col_name] = batch_paraphrase_api(
                     batch=original_questions, aug_client=aug_client, aug_model_name=aug_model_name,
@@ -281,7 +289,7 @@ def get_augmented_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
                     max_attempts=max_attempts
                 )
             else:
-                raise ValueError(f"Неизвестный тип аугментации: {aug_name}")
+                raise ValueError(f'Неизвестный тип аугментации: {aug_name}')
     return aug_df
 
     
@@ -375,3 +383,27 @@ def evaluate_tops(original_tops: tp.List[tp.List],
         total_score += iou_strategy(original_top, 
                                     modified_top)
     return total_score / len(original_tops)
+
+
+def get_sampler_data(sampler: tp.Union[Sampler, tp.Dict[str, tp.Any]],
+                     data_type: str,
+                     exec_env: tp.Literal['default', 'sberds']) -> pd.DataFrame:
+    '''
+    Получает данные из sampler с учетом среды выполнения теста
+    Parameters:
+        sampler: Объект класса Sampler 
+        data_type: Тип данных, на которых производится расчет метрики. Hint: название атрибута в sampler'е
+        exec_env: Среда выполнения 
+    '''
+    if exec_env == 'sberds':
+        sampler_dict = tp.cast(tp.Dict[str, tp.Any], sampler)
+        data = sampler_dict[data_type]['X']
+    else:
+        sampler_object = tp.cast(Sampler, sampler)
+        data = getattr(sampler_object, data_type)['X']
+    data = deepcopy(data)
+    
+    if 'session_id' in data.columns:
+        data = data.drop_duplicates(subset=['session_id']).reset_index(drop=True)
+    
+    return data
